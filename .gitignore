@@ -1,6 +1,7 @@
 # Build and distribution artifacts
 build/
 dist/
+out/
 .GeodeSync-pyinstaller/
 *.spec
 *.exe

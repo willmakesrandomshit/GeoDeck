@@ -1,0 +1,42 @@
+name: Bug report
+description: Report a problem with GeodeSync
+labels: ["bug"]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: GeodeSync version
+      placeholder: "3.0.1"
+    validations:
+      required: true
+  - type: dropdown
+    id: platform
+    attributes:
+      label: Operating system
+      options:
+        - Windows
+        - Linux
+        - macOS (source or CI build)
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect?
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What happened?
+      description: Include steps to reproduce and relevant error text. Remove account names, private paths, save data, and credentials.
+    validations:
+      required: true
+  - type: checkboxes
+    id: safety
+    attributes:
+      label: Before posting
+      options:
+        - label: I removed personal data, credentials, and save contents from this report.
+          required: true
