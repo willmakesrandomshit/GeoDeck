@@ -55,7 +55,7 @@ Security and trust details: [Security policy](SECURITY.md), [Privacy notes](PRIV
 
 ## Contributing
 
-Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. GeodeSync currently has no open-source licence; until a licence is added, the public source is available to inspect but reuse and redistribution are not granted. The owner is reviewing the rights and attribution for bundled third-party assets before choosing a licence.
+Bug reports and pull requests are welcome. Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. Original GeodeSync code and maintainer-created artwork are available under the [MIT licence](LICENSE). The Geode loader logo is excluded; see [third-party notices](THIRD_PARTY_NOTICES.md).
 
 ## Project status
 

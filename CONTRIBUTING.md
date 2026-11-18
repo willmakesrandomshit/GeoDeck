@@ -1,5 +1,7 @@
 # Contributing to GeodeSync
 
+Original GeodeSync code and maintainer-created artwork are licensed under the [MIT licence](LICENSE). Third-party materials are excluded as described in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). By submitting a contribution, you agree that it may be distributed under the MIT licence, except for any third-party materials you identify and have permission to contribute.
+
 Thanks for taking the time to report a problem or propose a change. GeodeSync manages game files and saves, so small, reviewable changes and clear test evidence matter.
 
 ## Before opening an issue
