@@ -15,12 +15,15 @@ from main import GDManager, APP_VERSION, SIZES_22081, validate_windows_game_imag
 
 
 def _tiny_png():
+    # Use a structurally complete image larger than the resource validator's
+    # minimum, so this fixture behaves consistently across platforms.
+    raw = b"\x00" + bytes(range(255)) * 4
     def chunk(kind, data):
         return (struct.pack(">I", len(data)) + kind + data +
                 struct.pack(">I", zlib.crc32(kind + data) & 0xFFFFFFFF))
     return (b"\x89PNG\r\n\x1a\n" +
-            chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 2, 0, 0, 0)) +
-            chunk(b"IDAT", zlib.compress(b"\x00\x00\x00\x00")) +
+            chunk(b"IHDR", struct.pack(">IIBBBBB", 85, 1, 8, 2, 0, 0, 0)) +
+            chunk(b"IDAT", zlib.compress(raw)) +
             chunk(b"IEND", b""))
 
 
@@ -232,7 +235,7 @@ class TestV230Features(unittest.TestCase):
 
         # 2. Restore vanilla textures
         ok_res, res_msg = self.mgr.restore_vanilla_textures()
-        self.assertTrue(ok_res)
+        self.assertTrue(ok_res, res_msg)
 
         with open(vanilla_sheet, "rb") as f:
             self.assertEqual(f.read(), vanilla_data)

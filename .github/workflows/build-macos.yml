@@ -7,8 +7,8 @@ on:
     tags:
       - "v*"
     branches:
+      # These branches run build and test jobs only. Publication is tag-only.
       - "main"
-      - "release/v*"
       - "hotfix/**"
 
 permissions:
@@ -192,7 +192,7 @@ jobs:
 
   attach-to-release:
     name: Attach platform builds to GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v') || startsWith(github.ref, 'refs/heads/release/v')
+    if: startsWith(github.ref, 'refs/tags/v')
     # Keep optional macOS packaging from blocking the verified Windows/Linux release.
     # macOS assets remain withheld until a notarized package is explicitly attached.
     needs: [build-windows, build-linux]
@@ -237,11 +237,7 @@ jobs:
           print(match.group(1))
           PY
           )
-          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
-            test "${GITHUB_REF_NAME#v}" = "$APP_VERSION"
-          else
-            test "$GITHUB_REF_NAME" = "release/v$APP_VERSION"
-          fi
+          test "$GITHUB_REF" = "refs/tags/v$APP_VERSION"
           echo "app_version=$APP_VERSION" >> "$GITHUB_OUTPUT"
       - name: Generate SHA-256 release checksums
         run: |
