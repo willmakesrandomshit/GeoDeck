@@ -51,6 +51,18 @@ launches the packaged app under Xvfb to catch missing runtime files or Tk
 startup failures. Linux builds target Steam's Windows game files under Proton;
 use Desktop Mode on Steam Deck. CI does not replace testing on a physical Deck.
 
+## Artwork helpers
+
+The optional artwork helpers use Pillow and write only to the selected output directory:
+
+```sh
+python -m pip install Pillow
+python generate_thumbnails.py --output-dir dist/artwork
+python extract_logos.py /path/to/LogoSheet-uhd.png --output-dir dist/artwork
+```
+
+Pass `--background` and `--font` to `generate_thumbnails.py` to use local image and font files. The logo extractor reads a sprite sheet you provide; see [third-party notices](THIRD_PARTY_NOTICES.md) before redistributing extracted Geode artwork.
+
 ## Checks
 
 Run the repository regression suite with:

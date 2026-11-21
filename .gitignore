@@ -26,14 +26,19 @@ env/
 *.sublime-project
 *.sublime-workspace
 
-# Secrets, tokens, keys, and credentials (CRITICAL)
-.env*
+# Local environment files and credentials
+.env
+.env.*
+!.env.example
+!.env.*.example
 *.env
 *webhook*.json
 discord_webhook.json
-*secret*
-*token*
-*credential*
+secrets/
+credentials/
+*secret*.json
+*token*.json
+*credential*.json
 *.pem
 *.key
 *.p12

@@ -1,9 +1,7 @@
+import argparse
 import os
-import math
-from PIL import Image, ImageDraw, ImageFont, ImageFilter
-
-def draw_rounded_rectangle(draw, bounds, radius, fill, outline=None, width=1):
-    draw.rounded_rectangle(bounds, radius=radius, fill=fill, outline=outline, width=width)
+from pathlib import Path
+from PIL import Image, ImageDraw, ImageFont
 
 def draw_crystal_icon(draw, cx, cy, size):
     s = size / 256.0
@@ -43,7 +41,25 @@ def draw_crystal_icon(draw, cx, cy, size):
     ]
     draw.polygon(lp, fill=(250, 204, 21, 255))
 
-def create_geodesync_thumbnail(bg_image_path=None, output_path="thumbnail.png", width=1280, height=720):
+def _load_bold_font(size, font_path=None):
+    if font_path is not None:
+        return ImageFont.truetype(str(font_path), size)
+
+    candidates = (
+        Path("C:/Windows/Fonts/arialbd.ttf"),
+        Path("/System/Library/Fonts/Supplemental/Arial Bold.ttf"),
+        Path("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"),
+    )
+    for candidate in candidates:
+        if candidate.is_file():
+            try:
+                return ImageFont.truetype(str(candidate), size)
+            except OSError:
+                continue
+    return ImageFont.load_default(size=size)
+
+
+def create_geodesync_thumbnail(bg_image_path=None, output_path="thumbnail.png", width=1280, height=720, font_path=None):
     if bg_image_path and os.path.exists(bg_image_path):
         base = Image.open(bg_image_path).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
         # Apply dark overlay for high contrast text readability
@@ -73,17 +89,13 @@ def create_geodesync_thumbnail(bg_image_path=None, output_path="thumbnail.png", 
     draw = ImageDraw.Draw(base)
 
     # Fonts
-    font_bold = "C:\\Windows\\Fonts\\bahnschrift.ttf"
-    if not os.path.exists(font_bold):
-        font_bold = "C:\\Windows\\Fonts\\segoeuib.ttf"
-
-    title_font = ImageFont.truetype(font_bold, 84)
-    subtitle_font = ImageFont.truetype(font_bold, 28)
-    badge_font = ImageFont.truetype(font_bold, 18)
-    pill_font = ImageFont.truetype(font_bold, 22)
+    title_font = _load_bold_font(84, font_path)
+    subtitle_font = _load_bold_font(28, font_path)
+    badge_font = _load_bold_font(18, font_path)
+    pill_font = _load_bold_font(22, font_path)
 
     # Top Tagline / Category Badge
-    top_badge_text = "GEOMETRY DASH • 1-CLICK MOD FIX"
+    top_badge_text = "GEOMETRY DASH • STEAM COMPANION"
     tb_bbox = draw.textbbox((0, 0), top_badge_text, font=badge_font)
     tb_w = tb_bbox[2] - tb_bbox[0]
     tb_h = tb_bbox[3] - tb_bbox[1]
@@ -113,7 +125,7 @@ def create_geodesync_thumbnail(bg_image_path=None, output_path="thumbnail.png", 
     draw.text((header_x + icon_size + 24, header_y + 12), title_text, fill=(255, 255, 255, 255), font=title_font)
 
     # Version tag pill
-    ver_text = "v1.1.1"
+    ver_text = "OPEN SOURCE"
     v_bbox = draw.textbbox((0, 0), ver_text, font=badge_font)
     v_w = v_bbox[2] - v_bbox[0]
     v_x = header_x + icon_size + 24 + t_w + 16
@@ -122,24 +134,24 @@ def create_geodesync_thumbnail(bg_image_path=None, output_path="thumbnail.png", 
     draw.text((v_x, v_y), ver_text, fill=(255, 255, 255), font=badge_font)
 
     # Subtitle
-    sub_text = "Play Geode Mods on 2.2081 • Auto-Downgrade • Protect Game Files"
+    sub_text = "Manage game versions • Organize Geode mods • Back up saves"
     s_bbox = draw.textbbox((0, 0), sub_text, font=subtitle_font)
     s_w = s_bbox[2] - s_bbox[0]
     draw.text((width // 2 - s_w // 2, header_y + icon_size + 15), sub_text, fill=(203, 213, 225, 255), font=subtitle_font)
 
     # Feature Cards / Pills
     pills = [
-        ("⚡ 1-Click Auto Downgrade", (139, 92, 246), (167, 139, 250)),
-        ("🔒 Steam Update Shield", (16, 185, 129), (52, 211, 153)),
-        ("💾 Safe GD Progress Backups", (56, 189, 248), (125, 211, 252)),
-        ("🛡️ 100% Open Source Safe", (245, 158, 11), (251, 191, 36)),
+        ("Game Version Tools", (139, 92, 246), (167, 139, 250)),
+        ("Steam Management", (16, 185, 129), (52, 211, 153)),
+        ("Save Backups", (56, 189, 248), (125, 211, 252)),
+        ("Setup Diagnostics", (245, 158, 11), (251, 191, 36)),
     ]
 
     p_total_w = len(pills) * 260 + (len(pills) - 1) * 16
     p_start_x = width // 2 - p_total_w // 2
     p_y = height - 210
 
-    for idx, (p_text, p_bg, p_border) in enumerate(pills):
+    for idx, (p_text, _p_bg, p_border) in enumerate(pills):
         px = p_start_x + idx * (260 + 16)
         draw.rounded_rectangle([px, p_y, px + 260, p_y + 70], radius=14, fill=(26, 35, 51, 230), outline=p_border, width=2)
         pt_bbox = draw.textbbox((0, 0), p_text, font=pill_font)
@@ -158,18 +170,32 @@ def create_geodesync_thumbnail(bg_image_path=None, output_path="thumbnail.png", 
     return base
 
 if __name__ == "__main__":
-    assets_dir = r"C:\Users\Owner\.gemini\antigravity\scratch\gd-version-switcher\assets"
-    os.makedirs(assets_dir, exist_ok=True)
-    
-    # 1. 16:9 YouTube / TikTok Thumbnail (1280x720)
-    thumb_path = os.path.join(assets_dir, "thumbnail.png")
-    create_geodesync_thumbnail(output_path=thumb_path, width=1280, height=720)
+    parser = argparse.ArgumentParser(description="Generate GeodeSync promotional artwork.")
+    parser.add_argument(
+        "--output-dir",
+        type=Path,
+        default=Path(__file__).resolve().parent / "assets",
+        help="Output directory (default: repository assets directory)",
+    )
+    parser.add_argument("--background", type=Path, help="Optional background image")
+    parser.add_argument("--font", type=Path, help="Optional bold TrueType font")
+    args = parser.parse_args()
 
-    # 2. 2:1 GitHub Social Preview Banner (1280x640)
-    banner_path = os.path.join(assets_dir, "banner.png")
-    create_geodesync_thumbnail(output_path=banner_path, width=1280, height=640)
-
-    # 3. Copy to Downloads for easy user access
-    dl_dir = r"C:\Users\Owner\Downloads"
-    create_geodesync_thumbnail(output_path=os.path.join(dl_dir, "GeodeSync-Thumbnail.png"), width=1280, height=720)
-    create_geodesync_thumbnail(output_path=os.path.join(dl_dir, "GeodeSync-Banner.png"), width=1280, height=640)
+    if args.background is not None and not args.background.is_file():
+        parser.error(f"background image does not exist: {args.background}")
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    background = str(args.background) if args.background is not None else None
+    create_geodesync_thumbnail(
+        bg_image_path=background,
+        output_path=args.output_dir / "thumbnail.png",
+        width=1280,
+        height=720,
+        font_path=args.font,
+    )
+    create_geodesync_thumbnail(
+        bg_image_path=background,
+        output_path=args.output_dir / "banner.png",
+        width=1280,
+        height=640,
+        font_path=args.font,
+    )

@@ -3,8 +3,11 @@
 import json
 import os
 import zipfile
-from typing import List, Optional
+from typing import List
+
 from geodesync.core.models import ModInfo
+
+MAX_MOD_METADATA_BYTES = 1024 * 1024
 
 
 class ModService:
@@ -16,7 +19,7 @@ class ModService:
 
     @classmethod
     def list_mods(cls, game_path: str) -> List[ModInfo]:
-        """Scan geode/mods directory for installed and disabled mods."""
+        """Scan geode/mods for installed mods, skipping invalid or oversized metadata."""
         mods_dir = cls.get_mods_dir(game_path)
         if not os.path.isdir(mods_dir):
             return []
@@ -32,22 +35,27 @@ class ModService:
             if not (enabled or disabled):
                 continue
 
-            mod_id = filename.replace(".geode.disabled", "").replace(".geode", "")
+            suffix = ".geode.disabled" if disabled else ".geode"
+            mod_id = filename[:-len(suffix)]
             name = mod_id
             version = "unknown"
             developer = "unknown"
 
-            # Try reading mod.json inside the zip
             try:
-                with zipfile.ZipFile(full_path, "r") as zf:
-                    if "mod.json" in zf.namelist():
-                        with zf.open("mod.json") as mj:
-                            data = json.loads(mj.read().decode("utf-8", errors="ignore"))
-                            mod_id = data.get("id", mod_id)
-                            name = data.get("name", name)
-                            version = data.get("version", version)
-                            developer = data.get("developer", developer)
-            except Exception:
+                with zipfile.ZipFile(full_path, "r") as archive:
+                    metadata = archive.getinfo("mod.json")
+                    if metadata.file_size <= MAX_MOD_METADATA_BYTES:
+                        with archive.open(metadata) as stream:
+                            raw = stream.read(MAX_MOD_METADATA_BYTES + 1)
+                        if len(raw) <= MAX_MOD_METADATA_BYTES:
+                            data = json.loads(raw.decode("utf-8"))
+                            if isinstance(data, dict):
+                                mod_id = data.get("id") if isinstance(data.get("id"), str) else mod_id
+                                name = data.get("name") if isinstance(data.get("name"), str) else name
+                                version = data.get("version") if isinstance(data.get("version"), str) else version
+                                developer = data.get("developer") if isinstance(data.get("developer"), str) else developer
+            except (OSError, EOFError, ValueError, RuntimeError, KeyError, zipfile.BadZipFile, zipfile.LargeZipFile):
+                # A corrupt or nonstandard mod archive should not hide other installed mods.
                 pass
 
             results.append(ModInfo(
@@ -56,23 +64,33 @@ class ModService:
                 version=version,
                 developer=developer,
                 enabled=enabled,
-                file_path=full_path,
+                path=full_path,
             ))
         return results
 
     @classmethod
     def toggle_mod(cls, mod: ModInfo) -> bool:
-        """Enable or disable a mod by renaming its file."""
-        if not os.path.isfile(mod.file_path):
+        """Enable or disable a mod without replacing an existing destination."""
+        source = mod.path
+        if not os.path.isfile(source):
+            return False
+
+        if mod.enabled:
+            if not source.endswith(".geode"):
+                return False
+            destination = source + ".disabled"
+        else:
+            if not source.endswith(".geode.disabled"):
+                return False
+            destination = source[:-len(".disabled")]
+
+        if os.path.lexists(destination):
             return False
         try:
-            if mod.enabled:
-                new_path = mod.file_path + ".disabled"
-            else:
-                new_path = mod.file_path[:-9]  # remove .disabled
-            os.rename(mod.file_path, new_path)
-            mod.file_path = new_path
-            mod.enabled = not mod.enabled
-            return True
+            os.rename(source, destination)
         except OSError:
             return False
+
+        mod.path = destination
+        mod.enabled = not mod.enabled
+        return True

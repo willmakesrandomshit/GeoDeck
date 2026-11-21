@@ -1,10 +1,12 @@
 """Game detection, state checks, and process inspection."""
 
 import os
+import subprocess
 import sys
-from typing import Optional, List
-from geodesync.platform.process_manager import safe_run_command
+from typing import Optional
+
 from geodesync.core.models import GameInstallation
+from geodesync.platform.process_manager import safe_run_command
 
 
 class GameService:
@@ -20,25 +22,30 @@ class GameService:
 
     @classmethod
     def is_game_running(cls) -> bool:
-        """Check if Geometry Dash is actively running without popping windows."""
+        """Check whether Geometry Dash is running without waiting indefinitely."""
+        if sys.platform == "win32":
+            try:
+                result = safe_run_command(
+                    ["tasklist", "/fi", "imagename eq GeometryDash.exe", "/nh"],
+                    timeout=5,
+                )
+                return "GeometryDash.exe" in (result.stdout or "")
+            except (OSError, subprocess.SubprocessError):
+                return False
+
+        process_pattern = "Geometry Dash" if sys.platform == "darwin" else "GeometryDash"
         try:
-            if sys.platform == "win32":
-                res = safe_run_command(["tasklist", "/fi", "imagename eq GeometryDash.exe", "/nh"])
-                return "GeometryDash.exe" in (res.stdout or "")
-            elif sys.platform == "darwin":
-                import subprocess
-                res = subprocess.run(["pgrep", "-f", "Geometry Dash"], stdout=subprocess.PIPE, text=True)
-                return bool(res.stdout and res.stdout.strip())
-            else:
-                import subprocess
-                res = subprocess.run(["pgrep", "-f", "GeometryDash"], stdout=subprocess.PIPE, text=True)
-                return bool(res.stdout and res.stdout.strip())
-        except Exception:
+            result = safe_run_command(
+                ["pgrep", "-f", process_pattern],
+                timeout=5,
+            )
+            return result.returncode == 0 and bool((result.stdout or "").strip())
+        except (OSError, subprocess.SubprocessError):
             return False
 
     @classmethod
     def auto_detect(cls) -> Optional[GameInstallation]:
-        """Find the local Geometry Dash directory."""
+        """Find Geometry Dash in common Windows Steam library locations."""
         for path in cls.COMMON_STEAM_PATHS:
             if os.path.isdir(path):
                 exe = os.path.join(path, "GeometryDash.exe")
@@ -46,6 +53,7 @@ class GameService:
                     geode_dir = os.path.join(path, "geode")
                     return GameInstallation(
                         path=path,
+                        is_steam=True,
                         exe_path=exe,
                         geode_installed=os.path.isdir(geode_dir),
                         geode_dir=geode_dir if os.path.isdir(geode_dir) else None,

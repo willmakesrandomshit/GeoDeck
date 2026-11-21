@@ -1,7 +1,7 @@
-"""Domain data models and immutable structures for GeodeSync."""
+"""Domain data models for GeodeSync."""
 
-from dataclasses import dataclass, field
-from typing import Optional, List, Dict, Any
+from dataclasses import dataclass
+from typing import Optional
 
 
 @dataclass
@@ -12,6 +12,8 @@ class GameInstallation:
     manifest_locked: bool = False
     geode_installed: bool = False
     geode_version: Optional[str] = None
+    exe_path: Optional[str] = None
+    geode_dir: Optional[str] = None
 
 
 @dataclass
@@ -25,6 +27,15 @@ class ModInfo:
     is_incompatible: bool = False
     incompatibility_reason: str = ""
     description: str = ""
+
+    @property
+    def file_path(self) -> str:
+        """Compatibility alias for services that use the explicit file-path name."""
+        return self.path
+
+    @file_path.setter
+    def file_path(self, value: str) -> None:
+        self.path = value
 
 
 @dataclass
