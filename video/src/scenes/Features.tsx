@@ -22,8 +22,8 @@ export const layout = (vertical: boolean, width: number, height: number) => {
     };
   }
   return {
-    text: {x: 150, y: 170, w: 620, h: height - 340} as Box,
-    win: {x: 830, y: 215, w: 1000, h: 650} as Box,
+    text: {x: 120, y: 170, w: 600, h: height - 340} as Box,
+    win: {x: 770, y: 186, w: 1100, h: 688} as Box,
     copySize: 104,
     subSize: 30,
   };
