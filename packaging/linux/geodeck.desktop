@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=GeoDeck
+Comment=Geometry Dash Launcher, Geode Mod Studio & Encrypted Save Vault
+Exec=sh -c 'exec "$(dirname "$1")/run-geodeck.sh"' _ %k
+Icon=geodeck_icon
+Terminal=false
+Categories=Game;Utility;
+StartupWMClass=geodedeck

@@ -1,6 +1,8 @@
 use eframe::egui::{self, Color32, RichText, Rounding, Stroke};
 
 use crate::core::config::LaunchMode;
+use crate::core::platform::open_in_file_manager;
+use crate::geode::profiles::QuickModPreset;
 use crate::ui::app::{GeodeDeckApp, ModsSubTab, NavTab};
 use crate::ui::icons::ph;
 use crate::ui::theme::*;
@@ -115,15 +117,69 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                     if let Some(ref inst) = install {
                                         if ui.button("Open Game Folder").clicked() {
                                             ui.close_menu();
-                                            let _ = std::process::Command::new("explorer")
-                                                .arg(&inst.path)
-                                                .spawn();
+                                            open_in_file_manager(std::path::Path::new(&inst.path));
                                         }
                                     }
                                 },
                             )
                             .response
                             .on_hover_text("Additional launch options");
+                        }
+                    });
+
+                    ui.add_space(12.0);
+                    // Compact Quick Controls: Mod Preset + Steam Update Lock + Health Check
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        ui.menu_button(
+                            semibold_text(
+                                &format!("{} Preset: {}", ph::SLIDERS, app.config.active_mod_preset),
+                                12.0,
+                                TEXT_PRIMARY,
+                            ),
+                            |ui| {
+                                for preset in [
+                                    QuickModPreset::Boosted,
+                                    QuickModPreset::Vanilla,
+                                    QuickModPreset::Tournament,
+                                    QuickModPreset::Globed,
+                                ] {
+                                    if ui.button(preset.label()).clicked() {
+                                        ui.close_menu();
+                                        app.apply_quick_preset_async(preset);
+                                    }
+                                }
+                            },
+                        )
+                        .response
+                        .on_hover_text("One-click Geode mod preset (Boosted, Vanilla, Tournament, Globed)");
+
+                        let lock_icon = if app.manifest_locked {
+                            ph::LOCK
+                        } else {
+                            ph::LOCK_OPEN
+                        };
+                        let lock_lbl = if app.manifest_locked {
+                            "Steam Update Locked"
+                        } else {
+                            "Steam Lock: Off"
+                        };
+                        if ui
+                            .add(epic_secondary_button(lock_icon, lock_lbl))
+                            .on_hover_text("Protect appmanifest_322170.acf from unwanted Steam auto-updates")
+                            .clicked()
+                        {
+                            app.toggle_manifest_lock_action();
+                        }
+
+                        if ui
+                            .add(epic_secondary_button(ph::SHIELD_CHECK, "Health Check"))
+                            .on_hover_text("Run 8-point diagnostic check (Ctrl+H)")
+                            .clicked()
+                        {
+                            app.ui_state.tools_subtab = 0;
+                            app.navigate_to(NavTab::Tools);
+                            app.run_health_check_async();
                         }
                     });
                 });
@@ -143,9 +199,59 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             });
         });
 
-    ui.add_space(16.0);
+    ui.add_space(14.0);
 
-    // 2x2 Quick Overview Grid
+    // Live Player Progression Strip from CCGameManager.dat
+    if let Some(ref sum) = app.save_summary {
+        let st = &sum.player_stats;
+        ui.columns(4, |cols| {
+            stat_tile(
+                &mut cols[0],
+                ph::STAR,
+                "PLAYER STATS",
+                &sum.player_name,
+                &format!("{} Stars  ·  {} Moons", st.stars, st.moons),
+                ACCENT_EPIC_BRIGHT,
+            );
+            stat_tile(
+                &mut cols[1],
+                ph::FIRE,
+                "DEMONS",
+                &format!("{}", st.demons),
+                &format!("{} active grind(s)", sum.active_grinds.len()),
+                STATUS_OK,
+            );
+            stat_tile(
+                &mut cols[2],
+                ph::DIAMOND,
+                "DIAMONDS & ORBS",
+                &format!("{}", st.diamonds),
+                &format!("{} Orbs  ·  {} Coins", st.orbs, st.user_coins),
+                TEXT_PRIMARY,
+            );
+            stat_tile(
+                &mut cols[3],
+                ph::SHIELD_CHECK,
+                "DISCORD RPC",
+                if !app.config.discord_rpc_enabled {
+                    "Disabled"
+                } else if app.discord_rpc.is_connected() {
+                    "Connected"
+                } else {
+                    "Waiting"
+                },
+                "Rich Presence IPC",
+                if app.discord_rpc.is_connected() {
+                    STATUS_OK
+                } else {
+                    TEXT_MUTED
+                },
+            );
+        });
+        ui.add_space(14.0);
+    }
+
+    // 3x2 Quick Overview Grid
     ui.spacing_mut().item_spacing.x = 12.0;
     ui.columns(2, |columns| {
         let bkp_latest = app
@@ -196,16 +302,37 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         if overview_tile(
             &mut columns[0],
             ph::MUSIC_NOTE,
-            "NONG Song Library",
+            "Audio & NONG Library",
             &songs_sub,
             ACCENT_EPIC_BRIGHT,
             ACCENT_EPIC_SOFT,
-            "Open Song Library",
+            "Open Audio & NONG Library",
         ) {
-            app.ui_state.tools_subtab = 2;
+            app.ui_state.tools_subtab = 3;
             app.navigate_to(NavTab::Tools);
         }
 
+        let demon_sub = if app.demonlist.is_empty() {
+            "Pointercrate Top 150 & Grinds".into()
+        } else {
+            format!("{} demons loaded · Top 150", app.demonlist.len())
+        };
+        if overview_tile(
+            &mut columns[1],
+            ph::STAR,
+            "Demonlist & Grinds",
+            &demon_sub,
+            STATUS_WARN,
+            STATUS_WARN_SOFT,
+            "Open Pointercrate Demonlist",
+        ) {
+            app.navigate_to(NavTab::Demonlist);
+        }
+    });
+
+    ui.add_space(12.0);
+
+    ui.columns(2, |columns| {
         let inst_count = app.config.installations.len();
         let inst_sub = format!(
             "{inst_count} slot(s)  ·  {}",
@@ -226,7 +353,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             STATUS_WARN_SOFT
         };
         if overview_tile(
-            &mut columns[1],
+            &mut columns[0],
             ph::SQUARES_FOUR,
             "Installs & Version Slots",
             &inst_sub,
@@ -235,6 +362,35 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             "Open Installs",
         ) {
             app.navigate_to(NavTab::Library);
+        }
+
+        let err_cnt = app
+            .health_findings
+            .iter()
+            .filter(|f| f.severity == crate::tools::diagnostics::DiagnosticSeverity::Error)
+            .count();
+        let health_sub = if app.health_findings.is_empty() {
+            "Run 8-point setup check".into()
+        } else if err_cnt == 0 {
+            format!("All {} checks healthy", app.health_findings.len())
+        } else {
+            format!("{err_cnt} setup issue(s) flagged")
+        };
+        if overview_tile(
+            &mut columns[1],
+            ph::PALETTE,
+            "Textures & Setup Health",
+            &health_sub,
+            if err_cnt > 0 { STATUS_ERR } else { STATUS_OK },
+            if err_cnt > 0 {
+                STATUS_ERR_SOFT
+            } else {
+                STATUS_OK_SOFT
+            },
+            "Open Health Check",
+        ) {
+            app.ui_state.tools_subtab = 0;
+            app.navigate_to(NavTab::Tools);
         }
     });
 }

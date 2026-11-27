@@ -1,4 +1,7 @@
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+#![cfg_attr(
+    all(target_os = "windows", not(debug_assertions)),
+    windows_subsystem = "windows"
+)]
 
 use geodedeck::backup::save_inspector::inspect_save_dir;
 use geodedeck::backup::vault::list_snapshots;
@@ -92,11 +95,16 @@ fn parse_cli_options() -> CliLaunchOptions {
                     "home" => initial_tab = Some(NavTab::Home),
                     "installs" | "library" => initial_tab = Some(NavTab::Library),
                     "mods" => initial_tab = Some(NavTab::Mods),
+                    "demonlist" | "demons" => initial_tab = Some(NavTab::Demonlist),
                     "backups" => initial_tab = Some(NavTab::Backups),
-                    "tools" => initial_tab = Some(NavTab::Tools),
-                    "songs" | "nong" => {
+                    "tools" | "health" => initial_tab = Some(NavTab::Tools),
+                    "textures" => {
                         initial_tab = Some(NavTab::Tools);
                         initial_tools_subtab = Some(2);
+                    }
+                    "songs" | "nong" => {
+                        initial_tab = Some(NavTab::Tools);
+                        initial_tools_subtab = Some(3);
                     }
                     "settings" | "about" => initial_tab = Some(NavTab::Settings),
                     _ => {}

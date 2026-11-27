@@ -116,6 +116,21 @@ pub fn audit_mods(
             continue;
         }
 
+        // 0. Check known broken Windows DLL entry-point crashers (e.g. prevter.imageplus v1.1.1 on 2.2081)
+        if m.id == "prevter.imageplus"
+            && m.version.trim_start_matches(['v', 'V']) == "1.1.1"
+            && active_gd_version == Some("2.2081")
+        {
+            issues.push(CompatibilityIssue {
+                severity: IssueSeverity::Error,
+                mod_id: m.id.clone(),
+                mod_name: m.name.clone(),
+                summary: "Broken v1.1.1 entry point on GD 2.2081".into(),
+                detail: "prevter.imageplus v1.1.1 triggers 'Entry Point Not Found' (?loadRootSubDictFromCompressedFile) crashes on GD 2.2081. Downgrade to v1.1.0.".into(),
+                action: IssueAction::SmartRepairMod(m.id.clone()),
+            });
+        }
+
         // 1. Check Geometry Dash target match
         if !gd_target_matches(m.gd_win_target.as_deref(), active_gd_version) {
             let mod_gd = m.gd_win_target.as_deref().unwrap_or("?");

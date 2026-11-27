@@ -34,12 +34,89 @@ struct GithubRelease {
     assets: Vec<GithubAsset>,
 }
 
-#[derive(Deserialize)]
-struct GithubAsset {
-    name: String,
-    browser_download_url: String,
+#[derive(Clone, Debug, Deserialize)]
+pub struct GithubAsset {
+    pub name: String,
+    pub browser_download_url: String,
     #[serde(default)]
-    digest: Option<String>,
+    pub digest: Option<String>,
+}
+
+pub fn select_platform_asset_for<'a>(
+    assets: &'a [GithubAsset],
+    target_os: &str,
+    target_arch: &str,
+) -> Option<&'a GithubAsset> {
+    let candidates: Vec<&GithubAsset> = assets
+        .iter()
+        .filter(|a| {
+            let l = a.name.to_lowercase();
+            !l.ends_with(".sha256") && l != "sha256sums.txt"
+        })
+        .collect();
+
+    match target_os {
+        "windows" => candidates
+            .iter()
+            .copied()
+            .find(|a| {
+                let l = a.name.to_lowercase();
+                (l.contains("windows") || l.contains("win")) && l.ends_with(".exe")
+            })
+            .or_else(|| {
+                candidates.iter().copied().find(|a| {
+                    let l = a.name.to_lowercase();
+                    (l.contains("windows") || l.contains("win")) && l.ends_with(".zip")
+                })
+            })
+            .or_else(|| {
+                candidates.iter().copied().find(|a| {
+                    let l = a.name.to_lowercase();
+                    !l.contains("linux")
+                        && !l.contains("macos")
+                        && (l.ends_with(".exe") || l.ends_with(".zip"))
+                })
+            }),
+        "macos" => {
+            let arch_tok = if target_arch == "aarch64" || target_arch == "arm64" {
+                "arm64"
+            } else {
+                "x64"
+            };
+            candidates
+                .iter()
+                .copied()
+                .find(|a| {
+                    let l = a.name.to_lowercase();
+                    l.contains("macos") && l.contains(arch_tok)
+                })
+                .or_else(|| {
+                    candidates.iter().copied().find(|a| {
+                        let l = a.name.to_lowercase();
+                        l.contains("macos") && l.contains("x86_64") && arch_tok == "x64"
+                    })
+                })
+                .or_else(|| {
+                    candidates
+                        .iter()
+                        .copied()
+                        .find(|a| a.name.to_lowercase().contains("macos"))
+                })
+        }
+        _ => candidates
+            .iter()
+            .copied()
+            .find(|a| {
+                let l = a.name.to_lowercase();
+                l.contains("linux") && l.ends_with(".tar.gz")
+            })
+            .or_else(|| {
+                candidates
+                    .iter()
+                    .copied()
+                    .find(|a| a.name.to_lowercase().contains("linux"))
+            }),
+    }
 }
 
 pub fn current_app_version() -> &'static str {
@@ -160,31 +237,55 @@ pub fn check_github_updates(repo: &str) -> Result<UpdateCheckResult, String> {
         });
     };
 
-    let win_asset = rel.assets.iter().find(|a| {
-        let lower = a.name.to_lowercase();
-        (lower.contains("win") || lower.ends_with(".exe") || lower.ends_with(".zip"))
-            && !lower.ends_with(".sha256")
-    });
+    let platform_asset = select_platform_asset_for(
+        &rel.assets,
+        std::env::consts::OS,
+        std::env::consts::ARCH,
+    );
 
-    let mut expected_sha256 = win_asset
+    let mut expected_sha256 = platform_asset
         .and_then(|a| a.digest.as_deref())
         .and_then(|d| d.strip_prefix("sha256:").map(|s| s.to_string()));
 
     if expected_sha256.is_none() {
-        if let Some(sha_asset) = rel
-            .assets
-            .iter()
-            .find(|a| a.name.to_lowercase().ends_with(".sha256"))
-        {
-            if let Ok(r) = agent
-                .get(&sha_asset.browser_download_url)
-                .set("User-Agent", &format!("GeoDeck/{}", current_app_display_version()))
-                .call()
-            {
-                if let Ok(text) = r.into_string() {
-                    if let Some(token) = text.split_whitespace().next() {
-                        if token.len() == 64 && token.chars().all(|c| c.is_ascii_hexdigit()) {
-                            expected_sha256 = Some(token.to_lowercase());
+        if let Some(asset) = platform_asset {
+            let sidecar_name = format!("{}.sha256", asset.name).to_lowercase();
+            let sha_asset = rel
+                .assets
+                .iter()
+                .find(|a| a.name.to_lowercase() == sidecar_name)
+                .or_else(|| {
+                    rel.assets
+                        .iter()
+                        .find(|a| a.name.to_lowercase() == "sha256sums.txt")
+                })
+                .or_else(|| {
+                    rel.assets
+                        .iter()
+                        .find(|a| a.name.to_lowercase().ends_with(".sha256"))
+                });
+            if let Some(sha_asset) = sha_asset {
+                if let Ok(r) = agent
+                    .get(&sha_asset.browser_download_url)
+                    .set(
+                        "User-Agent",
+                        &format!("GeoDeck/{}", current_app_display_version()),
+                    )
+                    .call()
+                {
+                    if let Ok(text) = r.into_string() {
+                        let target_lower = asset.name.to_lowercase();
+                        for line in text.lines() {
+                            if text.lines().count() > 1 && !line.to_lowercase().contains(&target_lower) {
+                                continue;
+                            }
+                            if let Some(token) = line.split_whitespace().next() {
+                                if token.len() == 64 && token.chars().all(|c| c.is_ascii_hexdigit())
+                                {
+                                    expected_sha256 = Some(token.to_lowercase());
+                                    break;
+                                }
+                            }
                         }
                     }
                 }
@@ -198,8 +299,8 @@ pub fn check_github_updates(repo: &str) -> Result<UpdateCheckResult, String> {
         update_available: latest_ver > current_ver,
         release_url: rel.html_url,
         release_notes: rel.body,
-        asset_name: win_asset.map(|a| a.name.clone()),
-        asset_url: win_asset.map(|a| a.browser_download_url.clone()),
+        asset_name: platform_asset.map(|a| a.name.clone()),
+        asset_url: platform_asset.map(|a| a.browser_download_url.clone()),
         expected_sha256,
     })
 }

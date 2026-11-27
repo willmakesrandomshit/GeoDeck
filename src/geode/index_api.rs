@@ -322,6 +322,13 @@ pub fn pick_compatible_version<'a>(
         if v.status != "accepted" || v.download_link.is_empty() {
             return false;
         }
+        // Known broken Windows release causing Entry Point Not Found crash on GD 2.2081
+        if index_mod.id == "prevter.imageplus"
+            && v.version.trim_start_matches(['v', 'V']) == "1.1.1"
+            && gd_version == Some("2.2081")
+        {
+            return false;
+        }
         let gd_ok = match (gd_version, v.gd_win.as_deref()) {
             (Some(active), Some(target)) if target != "*" && !target.is_empty() => {
                 target == active
@@ -421,7 +428,8 @@ pub fn install_mod_version(
     version: &IndexModVersion,
 ) -> Result<String, String> {
     let bytes = download_verified_bytes(&version.download_link, &version.hash)?;
-    let mods_dir = Path::new(game_dir).join("geode").join("mods");
+    let geode_dir = crate::core::platform::gd_geode_dir(Path::new(game_dir));
+    let mods_dir = geode_dir.join("mods");
     fs::create_dir_all(&mods_dir).map_err(|e| format!("create mods dir: {e}"))?;
 
     let tmp_path = mods_dir.join(format!("{mod_id}.geode.tmp"));
@@ -433,7 +441,26 @@ pub fn install_mod_version(
         let _ = fs::remove_file(&disabled_path);
     }
     fs::rename(&tmp_path, &final_path).map_err(|e| format!("finalize mod install: {e}"))?;
+    let unzipped = geode_dir.join("unzipped").join(mod_id);
+    if unzipped.is_dir() {
+        let _ = fs::remove_dir_all(&unzipped);
+    }
     Ok(format!("{} v{}", version.name, version.version))
+}
+
+pub fn install_specific_mod_version(
+    game_dir: &str,
+    mod_id: &str,
+    version_tag: &str,
+) -> Result<String, String> {
+    let remote = fetch_mod_details(mod_id)?;
+    let target = version_tag.trim_start_matches(['v', 'V']);
+    let chosen = remote
+        .versions
+        .iter()
+        .find(|v| v.version.trim_start_matches(['v', 'V']) == target)
+        .ok_or_else(|| format!("Version {version_tag} not found for {mod_id}."))?;
+    install_mod_version(game_dir, mod_id, chosen)
 }
 
 pub fn install_or_update_geode_loader(
@@ -441,8 +468,8 @@ pub fn install_or_update_geode_loader(
     release: &LoaderRelease,
 ) -> Result<String, String> {
     let game_root = Path::new(game_dir);
-    if !game_root.join("GeometryDash.exe").is_file() {
-        return Err("Invalid Geometry Dash folder (missing GeometryDash.exe).".into());
+    if !crate::core::platform::game_executable_exists(game_root) {
+        return Err("Invalid Geometry Dash folder (executable not found).".into());
     }
     let bin_zip = download_verified_bytes(&release.win_url, &release.win_hash)?;
     extract_zip_into(&bin_zip, game_root)?;

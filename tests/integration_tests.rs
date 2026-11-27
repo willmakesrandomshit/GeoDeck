@@ -686,3 +686,353 @@ fn test_updater_tag_repo_normalization_and_config_migration() {
     assert!(cfg.applied_tweaks.disable_fullscreen_opt);
     assert_eq!(cfg.config_schema_version, 2);
 }
+
+fn minimal_valid_png_bytes() -> Vec<u8> {
+    fn crc32(data: &[u8]) -> u32 {
+        let mut c = !0u32;
+        for &b in data {
+            c ^= b as u32;
+            for _ in 0..8 {
+                let mask = (c & 1).wrapping_neg();
+                c = (c >> 1) ^ (0xEDB8_8320 & mask);
+            }
+        }
+        !c
+    }
+    fn chunk(tag: &[u8; 4], payload: &[u8]) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.extend_from_slice(&(payload.len() as u32).to_be_bytes());
+        out.extend_from_slice(tag);
+        out.extend_from_slice(payload);
+        let mut crc_in = Vec::with_capacity(4 + payload.len());
+        crc_in.extend_from_slice(tag);
+        crc_in.extend_from_slice(payload);
+        out.extend_from_slice(&crc32(&crc_in).to_be_bytes());
+        out
+    }
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A];
+    // 1x1 RGBA IHDR
+    png.extend_from_slice(&chunk(
+        b"IHDR",
+        &[0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0, 0, 0],
+    ));
+    // Valid zlib-compressed scanline [0, 255, 0, 255, 255]
+    png.extend_from_slice(&chunk(
+        b"IDAT",
+        &[0x78, 0x9c, 0x63, 0xf8, 0xcf, 0xf0, 0x9f, 0x01, 0x05, 0x00, 0x04, 0xfc, 0x01, 0xff],
+    ));
+    png.extend_from_slice(&chunk(b"IEND", &[]));
+    png
+}
+
+#[test]
+fn test_player_stats_grinds_demons_and_pointercrate_crossref() {
+    let root = temp_test_dir("demonlist");
+    let gm_xml = r#"<?xml version="1.0"?><plist version="1.0"><dict>
+        <k>GJA_001</k><s>ProDasher</s>
+        <k>GJA_002</k><s>HIDDEN_SECRET_PASS</s>
+        <k>GJA_005</k><s>HIDDEN_GJP2_SECRET</s>
+        <k>GS_value</k><d>
+            <k>1</k><s>50000</s><k>2</k><s>12345</s><k>5</k><s>42</s>
+            <k>6</k><s>3500</s><k>8</k><s>149</s><k>12</k><s>250</s>
+            <k>13</k><s>4800</s><k>14</k><s>90000</s><k>28</k><s>65</s>
+        </d>
+        <k>GLM_03</k><d>
+            <k>1001</k><d><k>k2</k><s>Avernus</s><k>k5</k><s>PockeWindfish</s><k>k18</k><s>15400</s><k>k19</k><i>78</i><k>k21</k><i>100</i><k>k25</k><t/><k>k26</k><i>10</i><k>k4</k><s>H4sIAAAAAAA=</s></d>
+            <k>1002</k><d><k>k2</k><s>Tidal Wave</s><k>k5</k><s>OniLink</s><k>k18</k><s>42000</s><k>k19</k><i>100</i><k>k21</k><i>100</i><k>k25</k><t/><k>k26</k><i>10</i><k>k4</k><s>H4sIAAAAAAA=</s></d>
+        </d>
+    </dict></plist>"#;
+    fs::write(root.join("CCGameManager.dat"), encode_gd_dat(gm_xml)).unwrap();
+
+    let sum = inspect_save_dir(&root);
+    assert_eq!(sum.player_name, "ProDasher");
+    assert_eq!(sum.player_stats.stars, 3500);
+    assert_eq!(sum.player_stats.demons, 42);
+    assert_eq!(sum.player_stats.moons, 65);
+    assert_eq!(sum.player_stats.diamonds, 4800);
+    assert_eq!(sum.active_grinds.len(), 1);
+    assert_eq!(sum.active_grinds[0].name, "Avernus");
+    assert_eq!(sum.completed_demons.len(), 1);
+    assert_eq!(sum.completed_demons[0].name, "Tidal Wave");
+
+    let json = serde_json::to_string(&sum).unwrap();
+    assert!(!json.contains("HIDDEN_SECRET_PASS"));
+    assert!(!json.contains("HIDDEN_GJP2_SECRET"));
+
+    let pc_json = r#"[
+        {"position": 1, "name": "Tidal Wave", "requirement": 100, "video": "https://youtu.be/tw", "publisher": {"name": "OniLink"}, "verifier": {"name": "Zoink"}},
+        {"position": 2, "name": "Avernus", "requirement": 63, "video": "https://youtu.be/av", "publisher": {"name": "PockeWindfish"}, "verifier": {"name": "Zoink"}}
+    ]"#;
+    let list = geodedeck::tools::demonlist::parse_pointercrate_json(pc_json).unwrap();
+    assert_eq!(list.len(), 2);
+    assert_eq!(
+        geodedeck::tools::demonlist::match_demon_progress(&list[0].name, &sum.level_progress_by_name),
+        Some((100, 42000))
+    );
+    assert_eq!(
+        geodedeck::tools::demonlist::match_demon_progress(&list[1].name, &sum.level_progress_by_name),
+        Some((78, 15400))
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_texture_packs_png_crc_validation_and_audio_replacers() {
+    let root = temp_test_dir("assets_mgr");
+    let game = root.join("GD");
+    let res = game.join("Resources");
+    fs::create_dir_all(&res).unwrap();
+
+    let good_png = minimal_valid_png_bytes();
+    fs::write(res.join("GJ_GameSheet-hd.png"), &good_png).unwrap();
+    fs::write(res.join("StayInsideMe.mp3"), b"VANILLA_PRACTICE").unwrap();
+    fs::write(res.join("explode_11.ogg"), b"VANILLA_DEATH").unwrap();
+    assert!(geodedeck::tools::diagnostics::inspect_png_resource(&res.join("GJ_GameSheet-hd.png")).is_none());
+
+    // Package a texture pack zip
+    let pack_zip = root.join("CoolPack.zip");
+    {
+        let f = File::create(&pack_zip).unwrap();
+        let mut zw = ZipWriter::new(f);
+        zw.start_file("sub/GJ_GameSheet-hd.png", SimpleFileOptions::default())
+            .unwrap();
+        zw.write_all(&good_png).unwrap();
+        zw.finish().unwrap();
+    }
+
+    geodedeck::tools::assets_manager::install_texture_pack(
+        &game.to_string_lossy(),
+        &pack_zip,
+        Some("CoolPack"),
+    )
+    .unwrap();
+    assert!(game.join("Resources_Vanilla_Backup/GJ_GameSheet-hd.png").is_file());
+    let st = geodedeck::tools::assets_manager::get_assets_status(&game.to_string_lossy());
+    assert_eq!(st.active_pack, "CoolPack");
+    assert!(st.has_vanilla_backup);
+
+    // Corrupt backup PNG CRC -> restore MUST fail without changing Resources/
+    let mut bad_png = good_png.clone();
+    let len = bad_png.len();
+    bad_png[len - 15] ^= 0xFF;
+    assert!(geodedeck::tools::diagnostics::inspect_png_resource(&res.join("GJ_GameSheet-hd.png")).is_none());
+    fs::write(game.join("Resources_Vanilla_Backup/GJ_GameSheet-hd.png"), &bad_png).unwrap();
+    assert!(geodedeck::tools::diagnostics::inspect_png_resource(
+        &game.join("Resources_Vanilla_Backup/GJ_GameSheet-hd.png")
+    )
+    .is_some());
+    assert!(
+        geodedeck::tools::assets_manager::restore_vanilla_textures(&game.to_string_lossy()).is_err()
+    );
+
+    // Repair backup PNG -> restore succeeds
+    fs::write(game.join("Resources_Vanilla_Backup/GJ_GameSheet-hd.png"), &good_png).unwrap();
+    geodedeck::tools::assets_manager::restore_vanilla_textures(&game.to_string_lossy()).unwrap();
+
+    // Practice music & death SFX replace + rollback
+    let custom_mp3 = root.join("custom_practice.mp3");
+    let custom_ogg = root.join("custom_death.ogg");
+    fs::write(&custom_mp3, b"CUSTOM_PRACTICE").unwrap();
+    fs::write(&custom_ogg, b"CUSTOM_DEATH").unwrap();
+
+    geodedeck::tools::assets_manager::set_custom_practice_music(&game.to_string_lossy(), &custom_mp3)
+        .unwrap();
+    geodedeck::tools::assets_manager::set_custom_death_sfx(&game.to_string_lossy(), &custom_ogg)
+        .unwrap();
+    assert_eq!(fs::read(res.join("StayInsideMe.mp3")).unwrap(), b"CUSTOM_PRACTICE");
+    assert_eq!(fs::read(res.join("explode_11.ogg")).unwrap(), b"CUSTOM_DEATH");
+
+    geodedeck::tools::assets_manager::restore_vanilla_practice_music(&game.to_string_lossy())
+        .unwrap();
+    geodedeck::tools::assets_manager::restore_vanilla_death_sfx(&game.to_string_lossy()).unwrap();
+    assert_eq!(fs::read(res.join("StayInsideMe.mp3")).unwrap(), b"VANILLA_PRACTICE");
+    assert_eq!(fs::read(res.join("explode_11.ogg")).unwrap(), b"VANILLA_DEATH");
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_save_compactor_slots_salvage_and_geodesync_bundle() {
+    let root = temp_test_dir("save_tools");
+    let save_dir = root.join("Save");
+    let game_dir = root.join("GD");
+    let vault_dir = root.join("Vault");
+    let key_path = root.join("vault.key.dpapi");
+    fs::create_dir_all(&save_dir).unwrap();
+    fs::create_dir_all(game_dir.join("geode/mods")).unwrap();
+    fs::create_dir_all(game_dir.join("geode/config/demo.mod")).unwrap();
+
+    let gm_xml = r#"<?xml version="1.0"?><plist version="1.0"><dict>
+        <k>GJA_001</k><s>Builder</s>
+        <k>GS_value</k><d><k>5</k><s>12</s><k>6</k><s>750</s></d>
+    </dict></plist>"#;
+    let ll_xml = r#"<?xml version="1.0"?><plist version="1.0"><dict><k>LLM_01</k><d><k>_isArr</k><t/><k>k_0</k><d><k>kCEK</k><i>4</i><k>k2</k><s>MyLevel</s></d><k>k_1</k><d><k>kCEK</k><i>4</i><k>k1</k><i>999888</i><k>k2</k><s>CachedOnline</s><k>k21</k><i>1</i></d></d><k>LLM_02</k><i>42</i></dict></plist>"#;
+    fs::write(save_dir.join("CCGameManager.dat"), encode_gd_dat(gm_xml)).unwrap();
+    fs::write(save_dir.join("CCLocalLevels.dat"), encode_gd_dat(ll_xml)).unwrap();
+
+    let bloat = geodedeck::backup::save_tools::analyze_save_bloat(&save_dir).unwrap();
+    assert_eq!(bloat.total_levels, 2);
+    assert_eq!(bloat.online_cached, 1);
+    assert_eq!(bloat.user_created, 1);
+
+    let compact = geodedeck::backup::save_tools::clean_save_bloat(&save_dir).unwrap();
+    assert_eq!(compact.removed_levels, 1);
+    let after_bloat = geodedeck::backup::save_tools::analyze_save_bloat(&save_dir).unwrap();
+    assert_eq!(after_bloat.total_levels, 1);
+    assert_eq!(after_bloat.user_created, 1);
+
+    // Save slots + salvage
+    geodedeck::backup::save_tools::create_save_slot(&save_dir, "MainProfile").unwrap();
+    let slots = geodedeck::backup::save_tools::list_save_slots(&save_dir);
+    assert_eq!(slots.len(), 1);
+    assert_eq!(slots[0].stars, 750);
+
+    let salvage = geodedeck::backup::save_tools::find_salvageable_saves(&save_dir);
+    assert!(!salvage.is_empty());
+
+    // Modify live saves -> switch slot back restores original
+    fs::write(save_dir.join("CCGameManager.dat"), b"broken").unwrap();
+    geodedeck::backup::save_tools::switch_save_slot(
+        &save_dir,
+        "MainProfile",
+        &vault_dir,
+        &key_path,
+    )
+    .unwrap();
+    assert!(validate_dat_file(&save_dir.join("CCGameManager.dat")).is_ok());
+
+    // .geodesync bundle export -> clear -> import
+    fs::write(game_dir.join("geode/mods/demo.mod.geode"), b"modbytes").unwrap();
+    fs::write(game_dir.join("geode/config/demo.mod/cfg.json"), b"{}").unwrap();
+    let bundle = root.join("setup.geodesync");
+    geodedeck::backup::save_tools::export_geodesync_bundle(
+        &save_dir,
+        &game_dir.to_string_lossy(),
+        &bundle,
+        true,
+        true,
+        true,
+    )
+    .unwrap();
+    fs::remove_file(save_dir.join("CCGameManager.dat")).unwrap();
+    fs::remove_file(game_dir.join("geode/mods/demo.mod.geode")).unwrap();
+
+    geodedeck::backup::save_tools::import_geodesync_bundle(
+        &bundle,
+        &save_dir,
+        &game_dir.to_string_lossy(),
+        true,
+        true,
+        &vault_dir,
+    )
+    .unwrap();
+    assert!(save_dir.join("CCGameManager.dat").is_file());
+    assert!(game_dir.join("geode/mods/demo.mod.geode").is_file());
+    assert!(game_dir.join("geode/config/demo.mod/cfg.json").is_file());
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_diagnostics_pe_arch_keybinds_and_error_explainer() {
+    let root = temp_test_dir("diag_kb");
+    let game = root.join("GD");
+    let local = root.join("LocalGD");
+    fs::create_dir_all(local.join("geode/mods/mod.alpha")).unwrap();
+    fs::create_dir_all(local.join("geode/mods/mod.beta")).unwrap();
+    fs::create_dir_all(&game).unwrap();
+
+    // Valid x64 EXE + mismatched x86 DLL
+    fn make_pe(machine: u16) -> Vec<u8> {
+        let mut buf = vec![0u8; 512];
+        buf[0..2].copy_from_slice(b"MZ");
+        buf[0x3C..0x40].copy_from_slice(&0x80u32.to_le_bytes());
+        buf[0x80..0x84].copy_from_slice(b"PE\0\0");
+        buf[0x84..0x86].copy_from_slice(&machine.to_le_bytes()); // Machine
+        buf[0x86..0x88].copy_from_slice(&1u16.to_le_bytes()); // SectionCount = 1
+        buf[0x94..0x96].copy_from_slice(&4u16.to_le_bytes()); // OptionalHeader size
+        let magic: u16 = if machine == 0x014C { 0x10B } else { 0x20B };
+        buf[0x98..0x9A].copy_from_slice(&magic.to_le_bytes());
+        buf
+    }
+    fs::write(game.join("GeometryDash.exe"), make_pe(0x8664)).unwrap();
+    fs::write(game.join("good.dll"), make_pe(0x8664)).unwrap();
+    assert!(geodedeck::tools::diagnostics::validate_windows_game_images(&game).is_none());
+
+    fs::write(game.join("bad_x86.dll"), make_pe(0x014C)).unwrap();
+    let mismatch = geodedeck::tools::diagnostics::validate_windows_game_images(&game).unwrap();
+    assert!(mismatch.contains("x86"));
+
+    // Keybind collision detection
+    fs::write(
+        local.join("geode/mods/mod.alpha/settings.json"),
+        r#"{"noclip":{"key":78,"modifiers":2}}"#,
+    )
+    .unwrap();
+    fs::write(
+        local.join("geode/mods/mod.beta/saved.json"),
+        r#"{"speedhack":{"key":78,"modifiers":2}}"#,
+    )
+    .unwrap();
+    let kb = geodedeck::geode::keybinds::scan_keybind_conflicts(&game.to_string_lossy(), &local);
+    assert!(kb.conflicts.contains_key("N+Ctrl"));
+
+    // Error Explainer signatures
+    assert!(geodedeck::tools::diagnostics::explain_error_text("0xc000007b")
+        .0
+        .contains("0xc000007b"));
+    assert!(geodedeck::tools::diagnostics::explain_error_text("WinError 392 OneDrive")
+        .0
+        .contains("OneDrive"));
+    assert!(
+        geodedeck::tools::diagnostics::explain_error_text("prevter.imageplus entry point not found")
+            .0
+            .contains("Incompatible Mod")
+    );
+
+    let _ = fs::remove_dir_all(&root);
+}
+
+#[test]
+fn test_platform_updater_asset_selection() {
+    use geodedeck::core::updater::{select_platform_asset_for, GithubAsset};
+    let assets = vec![
+        GithubAsset {
+            name: "GeoDeck-Alpha-1.0.0-windows-x64.exe".into(),
+            browser_download_url: "https://example.com/win.exe".into(),
+            digest: None,
+        },
+        GithubAsset {
+            name: "GeoDeck-Alpha-1.0.0-linux-x64.tar.gz".into(),
+            browser_download_url: "https://example.com/linux.tar.gz".into(),
+            digest: None,
+        },
+        GithubAsset {
+            name: "GeoDeck-Alpha-1.0.0-macos-arm64.zip".into(),
+            browser_download_url: "https://example.com/mac-arm64.zip".into(),
+            digest: None,
+        },
+        GithubAsset {
+            name: "GeoDeck-Alpha-1.0.0-macos-x64.zip".into(),
+            browser_download_url: "https://example.com/mac-x64.zip".into(),
+            digest: None,
+        },
+    ];
+    assert_eq!(
+        select_platform_asset_for(&assets, "windows", "x86_64").unwrap().name,
+        "GeoDeck-Alpha-1.0.0-windows-x64.exe"
+    );
+    assert_eq!(
+        select_platform_asset_for(&assets, "linux", "x86_64").unwrap().name,
+        "GeoDeck-Alpha-1.0.0-linux-x64.tar.gz"
+    );
+    assert_eq!(
+        select_platform_asset_for(&assets, "macos", "aarch64").unwrap().name,
+        "GeoDeck-Alpha-1.0.0-macos-arm64.zip"
+    );
+    assert_eq!(
+        select_platform_asset_for(&assets, "macos", "x86_64").unwrap().name,
+        "GeoDeck-Alpha-1.0.0-macos-x64.zip"
+    );
+}

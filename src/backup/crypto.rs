@@ -116,7 +116,20 @@ pub fn load_or_create_vault_key(key_path: &Path) -> Result<[u8; 32], String> {
     rand::thread_rng().fill_bytes(&mut key);
     let protected = dpapi_protect(&key)?;
     fs::write(key_path, &protected).map_err(|e| format!("write vault key: {e}"))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = fs::set_permissions(key_path, fs::Permissions::from_mode(0o600));
+    }
     Ok(key)
+}
+
+pub fn vault_key_protection_label() -> &'static str {
+    if cfg!(windows) {
+        "Windows DPAPI"
+    } else {
+        "Local Key (0600)"
+    }
 }
 
 pub fn encrypt_vault_payload(key: &[u8; 32], plaintext: &[u8]) -> Result<Vec<u8>, String> {

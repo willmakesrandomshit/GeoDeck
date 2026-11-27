@@ -97,6 +97,53 @@ pub fn verify_installation(game_path: &str) -> IntegrityReport {
     let root = Path::new(game_path);
     let mut items = Vec::new();
 
+    if cfg!(target_os = "macos") && !root.join("GeometryDash.exe").is_file() {
+        if let Some(app) = crate::core::platform::find_macos_game_app(root) {
+            let app_valid = crate::core::platform::validate_macos_game_app(&app);
+            items.push(IntegrityItem {
+                relative_path: app
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_else(|| "Geometry Dash.app".into()),
+                category: "Core Engine Binary".into(),
+                required: true,
+                health: if app_valid.is_ok() {
+                    FileHealth::Healthy
+                } else {
+                    FileHealth::Corrupted
+                },
+                size_bytes: 0,
+                detail: app_valid
+                    .err()
+                    .unwrap_or_else(|| "macOS Info.plist & executable verified".into()),
+            });
+            let res_root = crate::core::platform::gd_resources_dir(root);
+            for rel in CORE_RESOURCES {
+                let short = rel.strip_prefix("Resources/").unwrap_or(rel);
+                items.push(check_file(&res_root, short, "Game Resource Asset", true, false));
+            }
+            let healthy_count = items.iter().filter(|i| i.health == FileHealth::Healthy).count();
+            let missing_count = items
+                .iter()
+                .filter(|i| i.required && i.health == FileHealth::Missing)
+                .count();
+            let corrupted_count = items
+                .iter()
+                .filter(|i| i.health == FileHealth::Corrupted)
+                .count();
+            return IntegrityReport {
+                game_path: game_path.to_string(),
+                checked_at: chrono::Local::now().format("%Y-%m-%d %H:%M:%S").to_string(),
+                healthy_count,
+                missing_count,
+                corrupted_count,
+                overall_ok: missing_count == 0 && corrupted_count == 0,
+                geode_ok: true,
+                items,
+            };
+        }
+    }
+
     for rel in CORE_BINARIES {
         items.push(check_file(root, rel, "Core Engine Binary", true, true));
     }

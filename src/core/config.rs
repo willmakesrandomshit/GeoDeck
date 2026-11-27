@@ -229,6 +229,8 @@ pub struct Config {
     pub update_repo: String,
     pub check_updates_on_startup: bool,
     pub redact_crash_usernames: bool,
+    pub discord_rpc_enabled: bool,
+    pub active_mod_preset: String,
     #[serde(default)]
     pub config_schema_version: u32,
 }
@@ -277,6 +279,8 @@ impl Default for Config {
             update_repo: "willmakesrandomshit/GeoDeck".into(),
             check_updates_on_startup: true,
             redact_crash_usernames: true,
+            discord_rpc_enabled: true,
+            active_mod_preset: "Boosted".into(),
             config_schema_version: 2,
         }
     }
@@ -308,10 +312,7 @@ pub fn default_depots() -> Vec<DepotPreset> {
 }
 
 pub fn config_dir() -> PathBuf {
-    std::env::var_os("APPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("GeodeDeck")
+    crate::core::platform::geodedeck_config_dir()
 }
 
 impl Config {

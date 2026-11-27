@@ -18,27 +18,40 @@ pub struct CrashReport {
 }
 
 pub fn scan_crash_logs(game_dir: &str) -> Vec<CrashReport> {
-    let dir = Path::new(game_dir).join("geode").join("crashlogs");
-    let Ok(rd) = fs::read_dir(&dir) else {
-        return Vec::new();
-    };
+    let mut dirs = vec![crate::core::platform::gd_geode_dir(Path::new(game_dir)).join("crashlogs")];
+    let local_crashes = crate::geode::package::local_gd_data_dir()
+        .join("geode")
+        .join("crashlogs");
+    if !dirs.contains(&local_crashes) {
+        dirs.push(local_crashes);
+    }
 
     let mut items: Vec<(std::time::SystemTime, CrashReport)> = Vec::new();
-    for entry in rd.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("log") {
-            continue;
-        }
-        let Ok(raw) = fs::read_to_string(&path) else {
+    let mut seen_paths = std::collections::HashSet::new();
+    for dir in dirs {
+        let Ok(rd) = fs::read_dir(&dir) else {
             continue;
         };
-        let filename = entry.file_name().to_string_lossy().into_owned();
-        let report = parse_crash_log(&filename, &path.to_string_lossy(), &raw);
-        let mtime = entry
-            .metadata()
-            .and_then(|m| m.modified())
-            .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-        items.push((mtime, report));
+        for entry in rd.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("log") {
+                continue;
+            }
+            let path_str = path.to_string_lossy().into_owned();
+            if !seen_paths.insert(path_str.clone()) {
+                continue;
+            }
+            let Ok(raw) = fs::read_to_string(&path) else {
+                continue;
+            };
+            let filename = entry.file_name().to_string_lossy().into_owned();
+            let report = parse_crash_log(&filename, &path_str, &raw);
+            let mtime = entry
+                .metadata()
+                .and_then(|m| m.modified())
+                .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
+            items.push((mtime, report));
+        }
     }
 
     items.sort_by(|a, b| b.0.cmp(&a.0));
@@ -148,10 +161,11 @@ pub fn format_redacted_summary(report: &CrashReport, redact_user: bool) -> Strin
     }
 
     if redact_user {
-        if let Ok(user) = std::env::var("USERNAME") {
-            if !user.is_empty() {
-                text = text.replace(&format!("Users\\{user}"), "Users\\<REDACTED>");
-            }
+        if let Some(user) = crate::core::platform::current_username() {
+            text = text
+                .replace(&format!("Users\\{user}"), "Users\\<REDACTED>")
+                .replace(&format!("Users/{user}"), "Users/<REDACTED>")
+                .replace(&format!("/home/{user}"), "/home/<REDACTED>");
         }
     }
     text

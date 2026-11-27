@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use crate::core::config::{GameInstallation, InstallationKind};
+use crate::core::platform::{game_executable_exists, open_url};
 use crate::launcher::detection::{probe_installation, steam_roots};
 
 pub fn sanitize_slot_name(name: &str) -> String {
@@ -32,8 +32,8 @@ pub fn create_isolated_snapshot(
     include_mods: bool,
 ) -> Result<GameInstallation, String> {
     let src = Path::new(source_dir);
-    if !src.join("GeometryDash.exe").is_file() {
-        return Err("Source path does not contain GeometryDash.exe".into());
+    if !game_executable_exists(src) {
+        return Err("Source path does not contain a Geometry Dash executable".into());
     }
 
     let folder_name = sanitize_slot_name(slot_name);
@@ -102,14 +102,21 @@ pub fn copy_dir_recursive(src: &Path, dst: &Path, include_geode_mods: bool) -> R
 /// for downloaded version builds that can be safely imported side-by-side without overwriting Steam Primary.
 pub fn find_downloaded_steam_depots() -> Vec<PathBuf> {
     let mut found = Vec::new();
+    let depot_ids = if cfg!(target_os = "macos") {
+        ["depot_322172", "depot_322171"]
+    } else {
+        ["depot_322171", "depot_322172"]
+    };
     for root in steam_roots() {
-        let depot = root
-            .join("steamapps")
-            .join("content")
-            .join("app_322170")
-            .join("depot_322171");
-        if depot.join("GeometryDash.exe").is_file() {
-            found.push(depot);
+        for dep in depot_ids {
+            let depot = root
+                .join("steamapps")
+                .join("content")
+                .join("app_322170")
+                .join(dep);
+            if game_executable_exists(&depot) && !found.contains(&depot) {
+                found.push(depot);
+            }
         }
     }
     found
@@ -138,21 +145,111 @@ pub fn import_depot_as_slot(
 }
 
 pub fn open_steam_console_for_manifest(manifest_id: &str) -> String {
+    let depot_id = if cfg!(target_os = "macos") { "322172" } else { "322171" };
     let cmd_str = if manifest_id == "latest" {
         "app_update 322170 validate".to_string()
     } else {
-        format!("download_depot 322170 322171 {manifest_id}")
+        format!("download_depot 322170 {depot_id} {manifest_id}")
     };
-    let _ = Command::new("cmd")
-        .args(["/C", "start", "", "steam://open/console"])
-        .spawn();
+    open_url("steam://open/console");
     cmd_str
 }
 
 pub fn trigger_steam_validate() {
-    let _ = Command::new("cmd")
-        .args(["/C", "start", "", "steam://validate/322170"])
-        .spawn();
+    open_url("steam://validate/322170");
+}
+
+/// Locates Steam's `appmanifest_322170.acf` for a Geometry Dash installation.
+pub fn find_appmanifest_path(game_path: &str) -> Option<PathBuf> {
+    if !game_path.trim().is_empty() {
+        if let Some(steamapps) = Path::new(game_path).parent().and_then(|p| p.parent()) {
+            let acf = steamapps.join("appmanifest_322170.acf");
+            if acf.is_file() {
+                return Some(acf);
+            }
+        }
+    }
+    for root in steam_roots() {
+        let acf = root.join("steamapps").join("appmanifest_322170.acf");
+        if acf.is_file() {
+            return Some(acf);
+        }
+    }
+    None
+}
+
+/// Returns whether `appmanifest_322170.acf` is write-protected (read-only / immutable) to block unwanted Steam updates.
+pub fn is_manifest_locked(game_path: &str) -> bool {
+    let Some(acf) = find_appmanifest_path(game_path) else {
+        return false;
+    };
+    let Ok(meta) = fs::metadata(&acf) else {
+        return false;
+    };
+    if meta.permissions().readonly() {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        if let Ok(out) = std::process::Command::new("ls")
+            .args(["-lO"])
+            .arg(&acf)
+            .output()
+        {
+            let text = String::from_utf8_lossy(&out.stdout);
+            if text.contains("uchg") {
+                return true;
+            }
+        }
+    }
+    false
+}
+
+/// Toggles Steam's `appmanifest_322170.acf` update protection (read-only lock + `chflags uchg` on macOS).
+pub fn set_manifest_locked(game_path: &str, lock: bool) -> Result<String, String> {
+    let acf = find_appmanifest_path(game_path)
+        .ok_or_else(|| "appmanifest_322170.acf not found for this Steam library.".to_string())?;
+
+    let mut perms = fs::metadata(&acf)
+        .map_err(|e| format!("stat manifest: {e}"))?
+        .permissions();
+
+    #[cfg(target_os = "macos")]
+    {
+        if lock {
+            perms.set_readonly(true);
+            fs::set_permissions(&acf, perms.clone()).map_err(|e| format!("chmod manifest: {e}"))?;
+            let status = std::process::Command::new("chflags")
+                .arg("uchg")
+                .arg(&acf)
+                .status()
+                .map_err(|e| format!("chflags uchg failed: {e}"))?;
+            if !status.success() {
+                perms.set_readonly(false);
+                let _ = fs::set_permissions(&acf, perms);
+                return Err("Could not apply macOS uchg immutable lock on manifest.".into());
+            }
+        } else {
+            let _ = std::process::Command::new("chflags")
+                .arg("nouchg")
+                .arg(&acf)
+                .status();
+            perms.set_readonly(false);
+            fs::set_permissions(&acf, perms).map_err(|e| format!("unlock manifest: {e}"))?;
+        }
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    {
+        perms.set_readonly(lock);
+        fs::set_permissions(&acf, perms).map_err(|e| format!("set manifest lock: {e}"))?;
+    }
+
+    Ok(if lock {
+        "Steam Update Lock enabled: appmanifest_322170.acf is protected.".into()
+    } else {
+        "Steam Update Lock disabled: appmanifest_322170.acf is writable.".into()
+    })
 }
 
 pub fn delete_slot_directory(inst: &GameInstallation) -> Result<(), String> {

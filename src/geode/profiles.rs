@@ -137,6 +137,67 @@ pub fn apply_mod_profile_with_data_dir(
     Ok(changed)
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum QuickModPreset {
+    Boosted,
+    Vanilla,
+    Tournament,
+    Globed,
+}
+
+impl QuickModPreset {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Boosted => "Boosted",
+            Self::Vanilla => "Vanilla",
+            Self::Tournament => "Tournament",
+            Self::Globed => "Globed",
+        }
+    }
+}
+
+/// Applies one of the quick presets (`Boosted`, `Vanilla`, `Tournament`, `Globed`) using Geode's `saved.json`.
+pub fn apply_quick_mod_preset(
+    preset: QuickModPreset,
+    game_dir: &str,
+    local_data_dir: &Path,
+) -> Result<String, String> {
+    let mods = scan_installed_mods_with_data_dir(game_dir, local_data_dir);
+    if mods.is_empty() {
+        return Ok(format!(
+            "Preset '{}' applied (no mods installed).",
+            preset.label()
+        ));
+    }
+
+    let mut adjusted = 0usize;
+    for m in &mods {
+        let lower_id = m.id.to_lowercase();
+        let should_enable = match preset {
+            QuickModPreset::Vanilla => false,
+            QuickModPreset::Tournament => {
+                !(lower_id.contains("globed") || lower_id.contains("imageplus"))
+            }
+            QuickModPreset::Globed => {
+                if lower_id.contains("globed") || lower_id.contains("node-ids") {
+                    true
+                } else {
+                    m.enabled
+                }
+            }
+            QuickModPreset::Boosted => !(lower_id == "prevter.imageplus" && m.version == "1.1.1"),
+        };
+        if m.enabled != should_enable {
+            set_mod_enabled_by_id(game_dir, &m.id, should_enable, local_data_dir)?;
+            adjusted += 1;
+        }
+    }
+    Ok(format!(
+        "Preset '{}' applied ({adjusted} mod(s) toggled).",
+        preset.label()
+    ))
+}
+
 pub fn delete_profile_snapshot(profile_id: &str) {
     let dir = profile_snapshots_dir().join(profile_id);
     if dir.is_dir() {

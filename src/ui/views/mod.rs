@@ -1,4 +1,5 @@
 pub mod backups;
+pub mod demonlist;
 pub mod home;
 pub mod library;
 pub mod mods;

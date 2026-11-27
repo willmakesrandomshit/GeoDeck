@@ -231,18 +231,52 @@ pub fn cached_sha256(path: &Path) -> Result<(u64, String), String> {
     Ok((size, hex))
 }
 
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct DiscoveredInstall {
+    pub path: String,
+    pub name: String,
+    pub source: String,
+    pub version: String,
+    pub is_steam: bool,
+    pub is_onedrive: bool,
+}
+
 pub fn steam_roots() -> Vec<PathBuf> {
     let mut roots = Vec::new();
-    for base in [
-        std::env::var_os("ProgramFiles(x86)").map(PathBuf::from),
-        std::env::var_os("ProgramFiles").map(PathBuf::from),
-    ]
-    .into_iter()
-    .flatten()
+
+    #[cfg(target_os = "windows")]
     {
-        let steam = base.join("Steam");
-        if steam.is_dir() {
-            roots.push(steam);
+        for base in [
+            std::env::var_os("ProgramFiles(x86)").map(PathBuf::from),
+            std::env::var_os("ProgramFiles").map(PathBuf::from),
+        ]
+        .into_iter()
+        .flatten()
+        {
+            let steam = base.join("Steam");
+            if steam.is_dir() && !roots.contains(&steam) {
+                roots.push(steam);
+            }
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let mac_steam = crate::core::platform::home_dir()
+            .join("Library")
+            .join("Application Support")
+            .join("Steam");
+        if mac_steam.is_dir() && !roots.contains(&mac_steam) {
+            roots.push(mac_steam);
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        for r in crate::core::platform::discover_linux_steam_roots() {
+            if !roots.contains(&r) {
+                roots.push(r);
+            }
         }
     }
 
@@ -257,7 +291,12 @@ pub fn steam_roots() -> Vec<PathBuf> {
                 }
                 let parts: Vec<&str> = line.split('"').collect();
                 if parts.len() >= 4 {
-                    let pb = PathBuf::from(parts[3].replace("\\\\", "\\"));
+                    let raw_path = if cfg!(windows) {
+                        parts[3].replace("\\\\", "\\")
+                    } else {
+                        parts[3].replace("\\\\", "/")
+                    };
+                    let pb = PathBuf::from(raw_path);
                     if pb.is_dir() && !libraries.contains(&pb) {
                         libraries.push(pb);
                     }
@@ -276,19 +315,145 @@ pub fn steam_roots() -> Vec<PathBuf> {
 pub fn detect_steam_gd_path() -> Option<String> {
     for lib in steam_roots() {
         let candidate = lib.join("steamapps").join("common").join("Geometry Dash");
-        if candidate.join("GeometryDash.exe").is_file() {
+        if crate::core::platform::game_executable_exists(&candidate) {
             return Some(candidate.to_string_lossy().into_owned());
         }
     }
+    #[cfg(target_os = "windows")]
     for candidate in [
         r"C:\Program Files (x86)\Steam\steamapps\common\Geometry Dash",
         r"C:\Program Files\Steam\steamapps\common\Geometry Dash",
     ] {
-        if Path::new(candidate).join("GeometryDash.exe").is_file() {
+        if crate::core::platform::game_executable_exists(Path::new(candidate)) {
             return Some(candidate.to_string());
         }
     }
+    #[cfg(target_os = "macos")]
+    {
+        let candidate = crate::core::platform::home_dir()
+            .join("Library")
+            .join("Application Support")
+            .join("Steam")
+            .join("steamapps")
+            .join("common")
+            .join("Geometry Dash");
+        if crate::core::platform::game_executable_exists(&candidate) {
+            return Some(candidate.to_string_lossy().into_owned());
+        }
+    }
     None
+}
+
+/// Discovers all Geometry Dash installations across Steam libraries, OneDrive, user folders, and common drives.
+pub fn find_all_gd_installations() -> Vec<DiscoveredInstall> {
+    let mut results = Vec::new();
+    let mut seen: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    let mut try_add = |folder: &Path, fallback_source: &str| {
+        if !folder.is_dir() || !crate::core::platform::game_executable_exists(folder) {
+            return;
+        }
+        let canon = fs::canonicalize(folder).unwrap_or_else(|_| folder.to_path_buf());
+        let path_str = canon.to_string_lossy().into_owned();
+        let norm = path_str.to_lowercase();
+        if !seen.insert(norm.clone()) {
+            return;
+        }
+        let is_steam = crate::core::platform::is_steam_library_game_path(&path_str);
+        let is_onedrive = norm.contains("onedrive");
+        let source = if is_steam {
+            "Steam".to_string()
+        } else if is_onedrive {
+            "OneDrive".to_string()
+        } else {
+            fallback_source.to_string()
+        };
+        let exe = canon.join("GeometryDash.exe");
+        let version = if exe.is_file() {
+            read_pe_timestamp(&exe)
+                .ok()
+                .and_then(timestamp_to_gd_version)
+                .map(|s| s.to_string())
+                .unwrap_or_else(|| "Custom".into())
+        } else if let Some(app) = crate::core::platform::find_macos_game_app(&canon) {
+            fs::read_to_string(app.join("Contents").join("Info.plist"))
+                .ok()
+                .and_then(|s| {
+                    crate::core::platform::extract_plist_xml_string(&s, "CFBundleShortVersionString")
+                })
+                .unwrap_or_else(|| "macOS".into())
+        } else {
+            "Unknown".into()
+        };
+        let name = canon
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "Geometry Dash".into());
+
+        results.push(DiscoveredInstall {
+            path: path_str,
+            name,
+            source,
+            version,
+            is_steam,
+            is_onedrive,
+        });
+    };
+
+    for lib in steam_roots() {
+        let common = lib.join("steamapps").join("common");
+        if let Ok(rd) = fs::read_dir(&common) {
+            for entry in rd.flatten() {
+                let p = entry.path();
+                if p.is_dir() {
+                    try_add(&p, "Steam");
+                }
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    for od in crate::core::platform::discover_onedrive_roots() {
+        for sub in [
+            "",
+            "Desktop",
+            "Documents",
+            "Games",
+            "GeometryDash",
+            "Geometry Dash",
+        ] {
+            let target = if sub.is_empty() { od.clone() } else { od.join(sub) };
+            if target.is_dir() {
+                try_add(&target, "OneDrive");
+                if let Ok(rd) = fs::read_dir(&target) {
+                    for entry in rd.flatten() {
+                        if entry.path().is_dir() {
+                            try_add(&entry.path(), "OneDrive");
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    let home = crate::core::platform::home_dir();
+    for folder_name in ["Desktop", "Documents", "Downloads", "Games"] {
+        let base = home.join(folder_name);
+        if base.is_dir() {
+            for name in ["Geometry Dash", "GeometryDash", "GD", "GD 2.2"] {
+                try_add(&base.join(name), "Local");
+            }
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    for drive in [r"C:\", r"D:\", r"E:\"] {
+        for root_name in ["Games", "GeometryDash", "Geometry Dash", "GD"] {
+            try_add(&Path::new(drive).join(root_name), "Local");
+        }
+    }
+
+    results
 }
 
 pub fn parse_steam_appmanifest(game_dir: &Path) -> Option<SteamAppManifest> {
@@ -413,26 +578,58 @@ pub fn probe_installation(path_str: &str) -> InstallationProbe {
     }
     let dir = Path::new(path_str);
     let exe = dir.join("GeometryDash.exe");
-    if !exe.is_file() {
+    let mac_app = if cfg!(target_os = "macos") {
+        crate::core::platform::find_macos_game_app(dir)
+    } else {
+        None
+    };
+
+    if exe.is_file() {
+        probe.exe_exists = true;
+        if let Ok((sz, sha)) = cached_sha256(&exe) {
+            probe.exe_size_bytes = sz;
+            probe.exe_sha256 = sha;
+        }
+        if let Ok(ts) = read_pe_timestamp(&exe) {
+            probe.pe_timestamp = Some(ts);
+            probe.gd_version = timestamp_to_gd_version(ts).map(|s| s.to_string());
+        }
+    } else if let Some(ref app) = mac_app {
+        probe.exe_exists = crate::core::platform::validate_macos_game_app(app).is_ok();
+        let plist = app.join("Contents").join("Info.plist");
+        if let Ok(raw) = fs::read_to_string(&plist) {
+            probe.gd_version =
+                crate::core::platform::extract_plist_xml_string(&raw, "CFBundleShortVersionString")
+                    .or_else(|| {
+                        crate::core::platform::extract_plist_xml_string(&raw, "CFBundleVersion")
+                    });
+        }
+        let geode_dylib = app.join("Contents").join("Frameworks").join("Geode.dylib").is_file()
+            || app.join("Contents").join("MacOS").join("Geode.dylib").is_file()
+            || app
+                .join("Contents")
+                .join("Frameworks")
+                .join("Geode.framework")
+                .join("Geode")
+                .is_file();
+        probe.geode_installed = geode_dylib || detect_geode_version_from_logs(dir).is_some();
+        probe.geode_proxy_present = probe.geode_installed;
+        if probe.geode_installed {
+            probe.geode_version = detect_geode_version_from_logs(dir)
+                .or_else(|| detect_geode_version_from_logs(&crate::geode::package::local_gd_data_dir()));
+        }
+    } else {
         return probe;
     }
 
-    probe.exe_exists = true;
-    if let Ok((sz, sha)) = cached_sha256(&exe) {
-        probe.exe_size_bytes = sz;
-        probe.exe_sha256 = sha;
-    }
-    if let Ok(ts) = read_pe_timestamp(&exe) {
-        probe.pe_timestamp = Some(ts);
-        probe.gd_version = timestamp_to_gd_version(ts).map(|s| s.to_string());
-    }
-
-    let geode_dll = dir.join("Geode.dll");
-    probe.geode_installed = geode_dll.is_file();
-    probe.geode_proxy_present = dir.join("XInput1_4.dll").is_file();
-    if probe.geode_installed {
-        probe.geode_version =
-            parse_pe_file_version(&geode_dll).or_else(|| detect_geode_version_from_logs(dir));
+    if mac_app.is_none() {
+        let geode_dll = dir.join("Geode.dll");
+        probe.geode_installed = geode_dll.is_file();
+        probe.geode_proxy_present = dir.join("XInput1_4.dll").is_file();
+        if probe.geode_installed {
+            probe.geode_version =
+                parse_pe_file_version(&geode_dll).or_else(|| detect_geode_version_from_logs(dir));
+        }
     }
 
     probe.steam_manifest = parse_steam_appmanifest(dir);

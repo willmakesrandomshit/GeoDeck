@@ -103,6 +103,7 @@ fn detect_display_mode() -> (u32, u32, u32) {
     (1920, 1080, 60)
 }
 
+#[cfg(windows)]
 fn detect_gpus() -> Vec<String> {
     let mut gpus = Vec::new();
     let out = Command::new("reg")
@@ -134,4 +135,16 @@ fn detect_gpus() -> Vec<String> {
         gpus.push("Default DirectX / OpenGL Display Adapter".into());
     }
     gpus
+}
+
+#[cfg(not(windows))]
+fn detect_gpus() -> Vec<String> {
+    #[cfg(target_os = "macos")]
+    {
+        vec!["Apple Metal / OpenGL Display Adapter".into()]
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        vec!["Linux OpenGL / Vulkan / Proton Display Adapter".into()]
+    }
 }

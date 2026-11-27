@@ -1,7 +1,9 @@
 use eframe::egui::{self, RichText, Rounding, Stroke};
 
+use crate::core::platform::open_in_file_manager;
 use crate::geode::dependency::{IssueAction, IssueSeverity};
 use crate::geode::package::{local_gd_data_dir, remove_installed_mod, set_mod_enabled};
+use crate::geode::profiles::QuickModPreset;
 use crate::launcher::detection::human_bytes;
 use crate::ui::app::{GeodeDeckApp, ModsSubTab};
 use crate::ui::icons::ph;
@@ -21,7 +23,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         ModsSubTab::ProfilesAndExport => 3,
     };
     let audit_total = app.mod_audit.errors + app.mod_audit.warnings;
-    let audit_lbl = format!("Dependency Audit ({audit_total})");
+    let audit_lbl = format!("Audit & Keybinds ({audit_total})");
     let inst_lbl = format!("Installed ({})", app.installed_mods.len());
     epic_subtab_bar(
         ui,
@@ -129,12 +131,16 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 
         ui.horizontal_wrapped(|ui| {
             let search_w = (ui.available_width() - 360.0).clamp(160.0, 420.0);
-            styled_search_bar(
+            let search_resp = styled_search_bar(
                 ui,
                 &mut app.ui_state.mod_search,
                 "Search installed mods, IDs, or developers...",
                 search_w,
             );
+            if app.ui_state.focus_search_requested {
+                search_resp.request_focus();
+                app.ui_state.focus_search_requested = false;
+            }
 
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -155,10 +161,11 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     .on_hover_text("Open <game>/geode/mods")
                     .clicked()
                 {
-                    let p = std::path::Path::new(&app.config.game_path)
-                        .join("geode")
-                        .join("mods");
-                    let _ = std::process::Command::new("explorer").arg(p).spawn();
+                    let p = crate::core::platform::gd_geode_dir(std::path::Path::new(
+                        &app.config.game_path,
+                    ))
+                    .join("mods");
+                    open_in_file_manager(&p);
                 }
             });
         });
@@ -412,9 +419,7 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                     {
                                         let cfg_dir =
                                             local_gd_data_dir().join("geode/mods").join(&m.id);
-                                        let _ = std::process::Command::new("explorer")
-                                            .arg(cfg_dir)
-                                            .spawn();
+                                        open_in_file_manager(&cfg_dir);
                                     }
                                 },
                             );
@@ -457,15 +462,47 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     });
 }
 
+fn mod_matches_category(item: &crate::geode::index_api::IndexMod, cat: usize, is_inst: bool) -> bool {
+    if cat == 0 {
+        return true;
+    }
+    if cat == 4 {
+        return is_inst;
+    }
+    let haystack = format!(
+        "{} {} {} {}",
+        item.id.to_lowercase(),
+        item.name.to_lowercase(),
+        item.description.to_lowercase(),
+        item.tags.join(" ").to_lowercase()
+    );
+    match cat {
+        1 => ["utility", "editor", "bugfix", "enhancement", "qol", "fps", "cheat", "megahack", "eclipse", "prism"]
+            .iter()
+            .any(|k| haystack.contains(k)),
+        2 => ["customization", "texture", "music", "jukebox", "shader", "audio", "visual", "color", "icon", "song"]
+            .iter()
+            .any(|k| haystack.contains(k)),
+        3 => ["online", "multiplayer", "globed", "chat", "friends", "coop", "versus"]
+            .iter()
+            .any(|k| haystack.contains(k)),
+        _ => true,
+    }
+}
+
 fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     card_frame().show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            styled_search_bar(
+            let search_resp = styled_search_bar(
                 ui,
                 &mut app.ui_state.index_query,
                 "Search Geode Index...",
                 250.0,
             );
+            if app.ui_state.focus_search_requested {
+                search_resp.request_focus();
+                app.ui_state.focus_search_requested = false;
+            }
             egui::ComboBox::from_id_salt("epic_index_sort")
                 .selected_text(&app.ui_state.index_sort)
                 .show_ui(ui, |ui| {
@@ -484,12 +521,68 @@ fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             }
         });
         ui.add_space(8.0);
+        ui.horizontal_wrapped(|ui| {
+            for (idx, lbl) in [
+                "All",
+                "QoL & Tools",
+                "Visual & Audio",
+                "Multiplayer",
+                "Installed",
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let selected = app.ui_state.index_category == idx;
+                let resp = egui::Frame::none()
+                    .fill(if selected { ACCENT_EPIC_SOFT } else { BG_ELEVATED })
+                    .stroke(Stroke::new(
+                        1.0_f32,
+                        if selected { ACCENT_EPIC } else { BORDER_SUBTLE },
+                    ))
+                    .rounding(Rounding::same(RADIUS_PILL))
+                    .inner_margin(egui::Margin::symmetric(12.0, 5.0))
+                    .show(ui, |ui| {
+                        ui.label(semibold_text(
+                            lbl,
+                            12.0,
+                            if selected {
+                                ACCENT_EPIC_BRIGHT
+                            } else {
+                                TEXT_SECONDARY
+                            },
+                        ));
+                    })
+                    .response
+                    .interact(egui::Sense::click());
+                if resp.clicked() {
+                    app.ui_state.index_category = idx;
+                }
+            }
+        });
+        ui.add_space(8.0);
+
+        let installed_ids: std::collections::HashSet<String> =
+            app.installed_mods.iter().map(|m| m.id.clone()).collect();
+        let results: Vec<_> = app
+            .index_results
+            .iter()
+            .filter(|item| {
+                mod_matches_category(
+                    item,
+                    app.ui_state.index_category,
+                    installed_ids.contains(&item.id),
+                )
+            })
+            .cloned()
+            .collect();
 
         ui.horizontal(|ui| {
             ui.label(
                 RichText::new(format!(
-                    "{} mods in catalog  ·  Page {}",
-                    app.index_total, app.ui_state.index_page
+                    "{} showing ({} total in catalog)  ·  Page {}",
+                    results.len(),
+                    app.index_total,
+                    app.ui_state.index_page
                 ))
                 .size(12.0)
                 .color(TEXT_MUTED),
@@ -514,10 +607,6 @@ fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             });
         });
         ui.add_space(10.0);
-
-        let installed_ids: std::collections::HashSet<String> =
-            app.installed_mods.iter().map(|m| m.id.clone()).collect();
-        let results = app.index_results.clone();
 
         if results.is_empty() {
             empty_state_card(
@@ -675,7 +764,6 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 "All Dependencies Satisfied",
                 "All enabled Geode mods match your active GD binary, Geode ABI, and dependencies.",
             );
-            return;
         }
 
         for issue in audit.issues {
@@ -735,7 +823,17 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                 }
                             }
                             IssueAction::SmartRepairMod(ref mod_id) => {
-                                if ui
+                                if mod_id == "prevter.imageplus" {
+                                    if ui
+                                        .add(epic_cta_button(ph::WRENCH, "Downgrade v1.1.0"))
+                                        .clicked()
+                                    {
+                                        app.downgrade_mod_version_async(
+                                            mod_id.clone(),
+                                            "1.1.0".into(),
+                                        );
+                                    }
+                                } else if ui
                                     .add(epic_cta_button(ph::WRENCH, "Smart Repair"))
                                     .clicked()
                                 {
@@ -761,9 +859,114 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             ui.add_space(6.0);
         }
     });
+
+    ui.add_space(14.0);
+
+    // Keybind Doctor Card
+    let kb = app.keybind_report.clone();
+    card_frame().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            icon_tile(
+                ui,
+                ph::KEYBOARD,
+                38.0,
+                if kb.conflicts.is_empty() {
+                    STATUS_OK
+                } else {
+                    STATUS_WARN
+                },
+                if kb.conflicts.is_empty() {
+                    STATUS_OK_SOFT
+                } else {
+                    STATUS_WARN_SOFT
+                },
+            );
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.label(bold_text("Keybind Doctor", 15.5, TEXT_PRIMARY));
+                ui.label(
+                    RichText::new(format!(
+                        "{} hotkey binding(s) scanned  ·  {} conflict(s)",
+                        kb.total_bindings,
+                        kb.conflicts.len()
+                    ))
+                    .size(12.0)
+                    .color(TEXT_SECONDARY),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui
+                    .add(epic_secondary_button(ph::ARROWS_CLOCKWISE, "Scan Keybinds"))
+                    .clicked()
+                {
+                    app.scan_keybinds_async();
+                }
+            });
+        });
+        ui.add_space(10.0);
+
+        if kb.conflicts.is_empty() {
+            empty_state_card(
+                ui,
+                ph::CHECK_CIRCLE,
+                "No Keybind Collisions",
+                "No two Geode mods currently claim the same GLFW keyboard shortcut.",
+            );
+        } else {
+            for (combo, bindings) in &kb.conflicts {
+                elevated_card_frame().show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        badge_pill(ui, combo, STATUS_WARN, STATUS_WARN_SOFT);
+                        ui.label(bold_text("Collision between multiple mods:", 13.0, TEXT_PRIMARY));
+                    });
+                    for b in bindings {
+                        ui.label(
+                            RichText::new(format!("• {}  ->  {}", b.mod_id, b.action))
+                                .size(12.0)
+                                .color(TEXT_SECONDARY),
+                        );
+                    }
+                });
+                ui.add_space(6.0);
+            }
+        }
+    });
 }
 
 fn render_profiles_export(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
+    card_frame().show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            ui.vertical(|ui| {
+                ui.label(bold_text("One-Click Launch Mod Presets", 15.0, TEXT_PRIMARY));
+                ui.label(
+                    RichText::new("Quickly toggle mods into tournament, multiplayer, boosted, or vanilla setups via saved.json.")
+                        .size(12.0)
+                        .color(TEXT_SECONDARY),
+                );
+            });
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                for preset in [
+                    QuickModPreset::Vanilla,
+                    QuickModPreset::Globed,
+                    QuickModPreset::Tournament,
+                    QuickModPreset::Boosted,
+                ] {
+                    if ui
+                        .add(if app.config.active_mod_preset == preset.label() {
+                            brand_cta_button(ph::SLIDERS, preset.label())
+                        } else {
+                            epic_secondary_button(ph::SLIDERS, preset.label())
+                        })
+                        .clicked()
+                    {
+                        app.apply_quick_preset_async(preset);
+                    }
+                }
+            });
+        });
+    });
+    ui.add_space(12.0);
     ui.columns(2, |cols| {
         card_frame().show(&mut cols[0], |ui| {
             ui.set_min_height(320.0);
@@ -994,9 +1197,7 @@ fn render_profiles_export(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     .clicked()
                 {
                     let _ = std::fs::create_dir_all(&app.config.export_dir);
-                    let _ = std::process::Command::new("explorer")
-                        .arg(&app.config.export_dir)
-                        .spawn();
+                    open_in_file_manager(std::path::Path::new(&app.config.export_dir));
                 }
             });
         });

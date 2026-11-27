@@ -2,15 +2,31 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread;
 
 use crate::backup::save_inspector::SaveSummary;
+use crate::backup::save_tools::{SalvageCandidate, SaveBloatReport, SaveSlotInfo};
 use crate::backup::vault::SnapshotSummary;
 use crate::core::updater::UpdateCheckResult;
 use crate::geode::dependency::CompatibilityAudit;
 use crate::geode::index_api::{IndexMod, LoaderRelease};
+use crate::geode::keybinds::KeybindReport;
 use crate::geode::package::InstalledMod;
-use crate::launcher::detection::InstallationProbe;
+use crate::launcher::detection::{DiscoveredInstall, InstallationProbe};
 use crate::launcher::integrity::IntegrityReport;
+use crate::optimizer::tweaks::CacheSizes;
+use crate::tools::assets_manager::TexturePackStatus;
 use crate::tools::crash_analyzer::CrashReport;
+use crate::tools::demonlist::PointercrateDemon;
+use crate::tools::diagnostics::DiagnosticFinding;
 use crate::tools::songs::{CachedSongMeta, SongCacheReport};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum RefreshKind {
+    None,
+    Backups,
+    Mods,
+    Tools,
+    Probe,
+    All,
+}
 
 #[derive(Clone, Debug)]
 pub enum ToastKind {
@@ -47,6 +63,11 @@ pub enum WorkerEvent {
         save_summary: Option<SaveSummary>,
         legacy_backups: Vec<(String, std::path::PathBuf)>,
     },
+    SaveToolsRefreshed {
+        bloat: Option<SaveBloatReport>,
+        slots: Vec<SaveSlotInfo>,
+        salvage: Vec<SalvageCandidate>,
+    },
     MaxPerfApplied(Result<String, String>),
     CrashLogsScanned(Vec<CrashReport>),
     SongCacheScanned(SongCacheReport),
@@ -56,6 +77,17 @@ pub enum WorkerEvent {
     SongMetadataResolutionDone {
         resolved_count: usize,
         failed_offline: bool,
+    },
+    DemonlistFetched(Result<Vec<PointercrateDemon>, String>),
+    HealthCheckCompleted(Vec<DiagnosticFinding>),
+    KeybindsScanned(KeybindReport),
+    AssetsStatusUpdated(TexturePackStatus),
+    CacheSizesMeasured(CacheSizes),
+    InstallsScanned(Vec<DiscoveredInstall>),
+    GenericOpCompleted {
+        title: String,
+        result: Result<String, String>,
+        refresh: RefreshKind,
     },
     AppUpdateChecked(Result<UpdateCheckResult, String>),
     AppUpdateDownloaded(Result<String, String>),

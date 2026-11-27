@@ -66,7 +66,7 @@ pub fn find_running_gd_pid() -> Option<u32> {
     );
     for (pid, proc_) in sys.processes() {
         let name = proc_.name().to_string_lossy().to_lowercase();
-        if name == "geometrydash.exe" {
+        if name == "geometrydash.exe" || name == "geometry dash" || name == "geometrydash" {
             return Some(pid.as_u32());
         }
     }
@@ -81,7 +81,8 @@ pub fn terminate_gd_process() -> Result<(), String> {
     );
     let mut killed = false;
     for (_pid, proc_) in sys.processes() {
-        if proc_.name().to_string_lossy().eq_ignore_ascii_case("GeometryDash.exe") {
+        let name = proc_.name().to_string_lossy().to_lowercase();
+        if name == "geometrydash.exe" || name == "geometry dash" || name == "geometrydash" {
             if proc_.kill() {
                 killed = true;
             }
@@ -90,7 +91,7 @@ pub fn terminate_gd_process() -> Result<(), String> {
     if killed {
         Ok(())
     } else {
-        Err("GeometryDash.exe is not currently running.".into())
+        Err("Geometry Dash is not currently running.".into())
     }
 }
 
@@ -109,25 +110,29 @@ pub fn launch_game(
         return Err("Geometry Dash is already running.".into());
     }
 
-    let exe = PathBuf::from(game_path).join("GeometryDash.exe");
-    if !exe.is_file() {
-        return Err(format!("GeometryDash.exe not found at {}", exe.display()));
+    let game_dir_path = PathBuf::from(game_path);
+    if !crate::core::platform::game_executable_exists(&game_dir_path) {
+        return Err(format!("Geometry Dash executable not found at {game_path}"));
     }
 
     let pre_crashes = snapshot_crashlog_names(game_path);
     let force_safe = mode == LaunchMode::SafeMode;
     let args = build_launch_args(flags, custom_args, force_safe);
 
-    if mode == LaunchMode::SteamProtocol {
-        Command::new("cmd")
-            .args(["/C", "start", "", "steam://rungameid/322170"])
-            .spawn()
-            .map_err(|e| format!("Failed to invoke Steam launch: {e}"))?;
+    // On Linux, Steam runs Windows GeometryDash.exe through Proton so steam:// is the native launch path.
+    let use_steam_protocol = mode == LaunchMode::SteamProtocol || cfg!(target_os = "linux");
+
+    if use_steam_protocol {
+        if cfg!(target_os = "macos") {
+            if let Some(app) = crate::core::platform::find_macos_game_app(&game_dir_path) {
+                crate::core::platform::validate_macos_game_app(&app)?;
+            }
+        }
+        crate::core::platform::open_url("steam://rungameid/322170");
 
         let game_dir = game_path.to_string();
         thread::spawn(move || {
             let started = Instant::now();
-            // Wait up to 20s for Steam to spawn GeometryDash.exe
             let mut pid = None;
             for _ in 0..40 {
                 if let Some(found) = find_running_gd_pid() {
@@ -168,6 +173,46 @@ pub fn launch_game(
         });
     }
 
+    #[cfg(target_os = "macos")]
+    {
+        if let Some(app) = crate::core::platform::find_macos_game_app(&game_dir_path) {
+            crate::core::platform::validate_macos_game_app(&app)?;
+            let mut cmd = Command::new("open");
+            cmd.arg("-W").arg("-a").arg(&app);
+            if !args.is_empty() {
+                cmd.arg("--args").args(&args);
+            }
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| format!("Failed to launch Geometry Dash.app: {e}"))?;
+            let pid = child.id();
+            let game_dir = game_path.to_string();
+            thread::spawn(move || {
+                let started = Instant::now();
+                let status = child.wait().ok();
+                let exit_code = status.and_then(|s| s.code());
+                let post_crashes = snapshot_crashlog_names(&game_dir);
+                let new_crashes = post_crashes.difference(&pre_crashes).count();
+                let _ = tx.send(WorkerEvent::GameExited {
+                    exit_code,
+                    duration_secs: started.elapsed().as_secs(),
+                    new_crashes,
+                });
+                if let Some(c) = ctx {
+                    c.request_repaint();
+                }
+            });
+            return Ok(ActiveSession {
+                pid: Some(pid),
+                installation_name: installation_name.to_string(),
+                game_path: game_path.to_string(),
+                started_at: Instant::now(),
+                launch_mode: mode,
+            });
+        }
+    }
+
+    let exe = game_dir_path.join("GeometryDash.exe");
     let mut child = Command::new(&exe)
         .current_dir(game_path)
         .args(&args)

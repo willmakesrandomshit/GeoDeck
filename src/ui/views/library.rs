@@ -1,6 +1,7 @@
 use eframe::egui::{self, RichText, Rounding, Stroke};
 
 use crate::core::config::{GameInstallation, InstallationKind};
+use crate::core::platform::open_in_file_manager;
 use crate::launcher::detection::probe_installation;
 use crate::launcher::versions::{
     delete_slot_directory, find_downloaded_steam_depots, open_steam_console_for_manifest,
@@ -23,6 +24,23 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             );
         });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            if ui
+                .add(epic_secondary_button(
+                    if app.manifest_locked { ph::LOCK } else { ph::LOCK_OPEN },
+                    if app.manifest_locked { "Steam Lock: ON" } else { "Steam Lock: OFF" },
+                ))
+                .on_hover_text("Protect appmanifest_322170.acf from Steam auto-updates")
+                .clicked()
+            {
+                app.toggle_manifest_lock_action();
+            }
+            if ui
+                .add(epic_secondary_button(ph::MAGNIFYING_GLASS, "Scan Drives"))
+                .on_hover_text("Scan Steam libraries, OneDrive, and user folders for GD installs")
+                .clicked()
+            {
+                app.scan_discovered_installs_async();
+            }
             if ui
                 .add(epic_cta_button(ph::PLUS, "Add Install Folder"))
                 .on_hover_text("Register an existing Geometry Dash folder")
@@ -135,9 +153,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                 RichText::new("Options").size(12.5).color(TEXT_PRIMARY),
                                 |ui| {
                                     if ui.button("Open Folder").clicked() {
-                                        let _ = std::process::Command::new("explorer")
-                                            .arg(&install.path)
-                                            .spawn();
+                                        open_in_file_manager(std::path::Path::new(&install.path));
                                         ui.close_menu();
                                     }
                                     let mut profile = install.pinned_mod_profile.clone();
@@ -215,6 +231,60 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     }
     if let Some(id) = activate {
         app.switch_active_installation(&id);
+    }
+
+    if !app.discovered_installs.is_empty() {
+        ui.add_space(14.0);
+        card_frame().show(ui, |ui| {
+            ui.label(bold_text(
+                &format!("Discovered GD Installations ({})", app.discovered_installs.len()),
+                15.0,
+                TEXT_PRIMARY,
+            ));
+            ui.add_space(6.0);
+            for disc in app.discovered_installs.clone() {
+                let already = app
+                    .config
+                    .installations
+                    .iter()
+                    .any(|i| i.path.eq_ignore_ascii_case(&disc.path));
+                elevated_card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width((ui.available_width() - 150.0).max(160.0));
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(bold_text(&disc.name, 13.5, TEXT_PRIMARY));
+                                badge_pill(ui, &disc.source, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
+                                badge_pill(ui, &format!("GD {}", disc.version), TEXT_SECONDARY, BG_SURFACE);
+                            });
+                            ui.label(RichText::new(&disc.path).size(11.5).color(TEXT_MUTED));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if already {
+                                badge_pill(ui, "Registered", STATUS_OK, STATUS_OK_SOFT);
+                            } else if ui.add(epic_cta_button(ph::PLUS, "Register")).clicked() {
+                                let probe = probe_installation(&disc.path);
+                                let id = format!("disc-{}", chrono::Local::now().format("%H%M%S"));
+                                app.config.installations.push(GameInstallation {
+                                    id: id.clone(),
+                                    name: format!("{} ({})", disc.name, disc.source),
+                                    path: disc.path,
+                                    kind: InstallationKind::Custom,
+                                    custom_args: String::new(),
+                                    geode_safe_mode: false,
+                                    notes: "Auto-discovered installation".into(),
+                                    pinned_mod_profile: None,
+                                    detected_gd_version: probe.gd_version,
+                                    detected_geode_version: probe.geode_version,
+                                });
+                                app.switch_active_installation(&id);
+                            }
+                        });
+                    });
+                });
+                ui.add_space(4.0);
+            }
+        });
     }
 
     ui.add_space(16.0);
@@ -464,7 +534,61 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             .size(12.5)
                             .color(TEXT_SECONDARY),
                     );
-                    ui.add_space(16.0);
+                    if !app.discovered_installs.is_empty() {
+        ui.add_space(14.0);
+        card_frame().show(ui, |ui| {
+            ui.label(bold_text(
+                &format!("Discovered GD Installations ({})", app.discovered_installs.len()),
+                15.0,
+                TEXT_PRIMARY,
+            ));
+            ui.add_space(6.0);
+            for disc in app.discovered_installs.clone() {
+                let already = app
+                    .config
+                    .installations
+                    .iter()
+                    .any(|i| i.path.eq_ignore_ascii_case(&disc.path));
+                elevated_card_frame().show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.vertical(|ui| {
+                            ui.set_width((ui.available_width() - 150.0).max(160.0));
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label(bold_text(&disc.name, 13.5, TEXT_PRIMARY));
+                                badge_pill(ui, &disc.source, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
+                                badge_pill(ui, &format!("GD {}", disc.version), TEXT_SECONDARY, BG_SURFACE);
+                            });
+                            ui.label(RichText::new(&disc.path).size(11.5).color(TEXT_MUTED));
+                        });
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if already {
+                                badge_pill(ui, "Registered", STATUS_OK, STATUS_OK_SOFT);
+                            } else if ui.add(epic_cta_button(ph::PLUS, "Register")).clicked() {
+                                let probe = probe_installation(&disc.path);
+                                let id = format!("disc-{}", chrono::Local::now().format("%H%M%S"));
+                                app.config.installations.push(GameInstallation {
+                                    id: id.clone(),
+                                    name: format!("{} ({})", disc.name, disc.source),
+                                    path: disc.path,
+                                    kind: InstallationKind::Custom,
+                                    custom_args: String::new(),
+                                    geode_safe_mode: false,
+                                    notes: "Auto-discovered installation".into(),
+                                    pinned_mod_profile: None,
+                                    detected_gd_version: probe.gd_version,
+                                    detected_geode_version: probe.geode_version,
+                                });
+                                app.switch_active_installation(&id);
+                            }
+                        });
+                    });
+                });
+                ui.add_space(4.0);
+            }
+        });
+    }
+
+    ui.add_space(16.0);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add(epic_danger_button(ph::TRASH, "Delete Folder"))

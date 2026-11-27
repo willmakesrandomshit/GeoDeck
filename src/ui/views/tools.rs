@@ -2,9 +2,11 @@ use eframe::egui::{self, RichText, Rounding, Stroke, Vec2};
 
 use crate::backup::save_inspector::export_level_to_gmd;
 use crate::core::config::LaunchMode;
+use crate::core::platform::reveal_file_in_file_manager;
 use crate::geode::package::{local_gd_data_dir, set_mod_enabled_by_id};
 use crate::launcher::detection::human_bytes;
 use crate::tools::crash_analyzer::{delete_crash_log, format_redacted_summary};
+use crate::tools::diagnostics::{explain_error_text, generate_support_report, DiagnosticSeverity};
 use crate::tools::songs::{
     clear_manual_song_metadata, filter_and_sort_songs, install_nong_replacement,
     remove_broken_zero_byte_songs, restore_original_song, set_manual_song_metadata,
@@ -17,32 +19,307 @@ use crate::ui::theme::*;
 pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     section_heading(
         ui,
-        "Diagnostics & Creator Tools",
-        "Inspect Geode crashlogs, export local editor levels, and manage your NONG Song Library.",
+        "Diagnostics, Textures & Audio Hub",
+        "Run 8-point setup health checks, manage texture packs, swap practice/death audio, inspect crashes, and browse NONG songs.",
     );
 
-    let crash_lbl = format!("Crash Diagnostics ({})", app.crash_reports.len());
+    let crash_lbl = format!("Crash Logs ({})", app.crash_reports.len());
     let levels_lbl = format!(
-        "Local Editor Levels ({})",
+        "Levels ({})",
         app.save_summary.as_ref().map(|s| s.level_count).unwrap_or(0)
     );
-    let songs_lbl = format!("NONG Song Library ({})", app.song_report.total_songs);
+    let songs_lbl = format!("Audio & NONG ({})", app.song_report.total_songs);
 
     epic_subtab_bar(
         ui,
         &[
+            (ph::SHIELD_CHECK, "Health Check"),
             (ph::BUG, &crash_lbl),
-            (ph::LAYERS, &levels_lbl),
+            (ph::PALETTE, "Texture Packs"),
             (ph::MUSIC_NOTE, &songs_lbl),
+            (ph::LAYERS, &levels_lbl),
         ],
         &mut app.ui_state.tools_subtab,
     );
 
     match app.ui_state.tools_subtab {
-        0 => render_crashes(app, ui),
-        1 => render_levels(app, ui),
-        _ => render_songs(app, ui),
+        0 => render_health_check(app, ui),
+        1 => render_crashes(app, ui),
+        2 => render_textures(app, ui),
+        3 => render_songs(app, ui),
+        _ => render_levels(app, ui),
     }
+}
+
+fn render_health_check(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
+    card_frame().show(ui, |ui| {
+        ui.horizontal(|ui| {
+            icon_tile(ui, ph::SHIELD_CHECK, 38.0, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.set_max_width((ui.available_width() - 56.0).max(200.0));
+                ui.label(bold_text(
+                    "8-Point Installation Health & Diagnostics (Ctrl+H)",
+                    15.5,
+                    TEXT_PRIMARY,
+                ));
+                ui.label(
+                    RichText::new("Checks Steam layout, PE/app integrity, VC++ runtime, PNG textures, OneDrive locks, write permissions, and multiple installs.")
+                        .size(12.0)
+                        .color(TEXT_SECONDARY),
+                );
+            });
+        });
+
+        ui.add_space(10.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 6.0;
+            if ui
+                .add_enabled(
+                    !app.health_checking,
+                    epic_cta_button(ph::ARROWS_CLOCKWISE, "Run Health Check"),
+                )
+                .clicked()
+            {
+                app.run_health_check_async();
+            }
+            if ui
+                .add(epic_secondary_button(ph::EXPORT, "Export Support Report"))
+                .clicked()
+            {
+                let report = generate_support_report(
+                    &app.config,
+                    &app.probe,
+                    &app.integrity_report,
+                    &app.installed_mods,
+                    &app.health_findings,
+                );
+                if let Some(dst) = rfd::FileDialog::new()
+                    .set_file_name("GeoDeck_Support_Report.txt")
+                    .add_filter("Text Report", &["txt"])
+                    .save_file()
+                {
+                    match std::fs::write(&dst, &report) {
+                        Ok(_) => app.push_toast(
+                            crate::core::worker::ToastKind::Success,
+                            "Support Report Exported",
+                            format!("Saved redacted report to {}", dst.display()),
+                        ),
+                        Err(e) => app.push_toast(
+                            crate::core::worker::ToastKind::Error,
+                            "Export Failed",
+                            e.to_string(),
+                        ),
+                    }
+                }
+            }
+            if ui
+                .add(epic_secondary_button(ph::COPY, "Copy Support Ticket"))
+                .clicked()
+            {
+                let report = generate_support_report(
+                    &app.config,
+                    &app.probe,
+                    &app.integrity_report,
+                    &app.installed_mods,
+                    &app.health_findings,
+                );
+                ui.ctx().copy_text(report);
+                app.push_toast(
+                    crate::core::worker::ToastKind::Info,
+                    "Support Ticket Copied",
+                    "Sanitized diagnostic summary copied to clipboard.",
+                );
+            }
+            let cache_total = app.cache_sizes.geode_temp_bytes + app.cache_sizes.old_logs_bytes;
+            if ui
+                .add(epic_secondary_button(
+                    ph::TRASH,
+                    &format!("Clean Geode Cache ({})", human_bytes(cache_total)),
+                ))
+                .on_hover_text("Clears <game>/geode/temp and keeps only the latest 20 logs")
+                .clicked()
+            {
+                app.clean_geode_caches_async();
+            }
+            if cfg!(target_os = "windows")
+                && ui
+                    .add(epic_secondary_button(ph::FLOPPY_DISK, "Pin OneDrive Local"))
+                    .on_hover_text("Runs attrib -U -P so cloud-only OneDrive stubs stay offline on disk")
+                    .clicked()
+            {
+                app.pin_onedrive_local_async();
+            }
+        });
+
+        ui.add_space(12.0);
+        if app.health_findings.is_empty() {
+            empty_state_card(
+                ui,
+                ph::SHIELD_CHECK,
+                "Running Health Scan...",
+                "Inspecting binaries, PNG textures, and environment health.",
+            );
+        } else {
+            for f in &app.health_findings {
+                let (col, bg, tag) = match f.severity {
+                    DiagnosticSeverity::Ok => (STATUS_OK, STATUS_OK_SOFT, "PASS"),
+                    DiagnosticSeverity::Warning => (STATUS_WARN, STATUS_WARN_SOFT, "WARN"),
+                    DiagnosticSeverity::Error => (STATUS_ERR, STATUS_ERR_SOFT, "ISSUE"),
+                };
+                elevated_card_frame().show(ui, |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        badge_pill(ui, tag, col, bg);
+                        ui.label(bold_text(&f.title, 13.5, TEXT_PRIMARY));
+                    });
+                    ui.add_space(3.0);
+                    ui.label(RichText::new(&f.detail).size(12.0).color(TEXT_SECONDARY));
+                    if f.severity != DiagnosticSeverity::Ok {
+                        ui.add_space(2.0);
+                        ui.label(
+                            RichText::new(format!("Fix: {}", f.steps))
+                                .size(11.5)
+                                .color(ACCENT_EPIC_BRIGHT),
+                        );
+                    }
+                });
+                ui.add_space(6.0);
+            }
+        }
+    });
+
+    ui.add_space(14.0);
+
+    // Plain-English Error Explainer Card
+    card_frame().show(ui, |ui| {
+        ui.label(bold_text("Plain-English Error Explainer", 15.5, TEXT_PRIMARY));
+        ui.label(
+            RichText::new("Paste any confusing Geometry Dash, Steam, Geode, or OS error code (e.g. 0xc000007b, WinError 32, 0x8007016a) for safe recovery steps.")
+                .size(12.0)
+                .color(TEXT_SECONDARY),
+        );
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            styled_text_input(
+                ui,
+                &mut app.ui_state.error_explainer_input,
+                "Paste error message or code here...",
+                (ui.available_width() - 160.0).max(200.0),
+            );
+            if ui
+                .add(epic_cta_button(ph::MAGNIFYING_GLASS, "Explain Error"))
+                .clicked()
+            {
+                app.ui_state.error_explainer_result =
+                    Some(explain_error_text(&app.ui_state.error_explainer_input));
+            }
+        });
+        if let Some((ref title, ref body)) = app.ui_state.error_explainer_result {
+            ui.add_space(10.0);
+            inset_frame().show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.label(bold_text(title, 14.0, ACCENT_EPIC_BRIGHT));
+                ui.add_space(4.0);
+                ui.label(RichText::new(body).size(12.5).color(TEXT_PRIMARY));
+            });
+        }
+    });
+}
+
+fn render_textures(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
+    let st = app.assets_status.clone();
+    card_frame().show(ui, |ui| {
+        ui.horizontal_wrapped(|ui| {
+            icon_tile(ui, ph::PALETTE, 38.0, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
+            ui.add_space(4.0);
+            ui.vertical(|ui| {
+                ui.horizontal_wrapped(|ui| {
+                    ui.label(bold_text("Texture Pack Manager", 16.0, TEXT_PRIMARY));
+                    status_dot_pill(
+                        ui,
+                        &st.active_pack,
+                        if st.active_pack.contains("Vanilla") {
+                            STATUS_OK
+                        } else {
+                            ACCENT_EPIC_BRIGHT
+                        },
+                        if st.active_pack.contains("Vanilla") {
+                            STATUS_OK_SOFT
+                        } else {
+                            ACCENT_EPIC_SOFT
+                        },
+                    );
+                });
+                ui.label(
+                    RichText::new(format!(
+                        "Automatically safeguards vanilla assets in Resources_Vanilla_Backup ({} files) and verifies every PNG CRC-32 checksum before restoring.",
+                        st.vanilla_file_count
+                    ))
+                    .size(12.0)
+                    .color(TEXT_SECONDARY),
+                );
+            });
+        });
+
+        ui.add_space(14.0);
+        ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 8.0;
+            if ui
+                .add(epic_cta_button(ph::FILE_ARCHIVE, "Install Texture Pack (.zip)"))
+                .clicked()
+            {
+                if let Some(zip) = rfd::FileDialog::new()
+                    .add_filter("Texture Pack Zip", &["zip"])
+                    .pick_file()
+                {
+                    app.install_texture_pack_async(zip);
+                }
+            }
+            if ui
+                .add(epic_secondary_button(
+                    ph::FOLDER_OPEN,
+                    "Install Pack (Folder)",
+                ))
+                .clicked()
+            {
+                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                    app.install_texture_pack_async(dir);
+                }
+            }
+            if ui
+                .add(epic_secondary_button(
+                    ph::SHIELD_CHECK,
+                    "Backup Vanilla Now",
+                ))
+                .clicked()
+            {
+                app.backup_vanilla_textures_async();
+            }
+            if ui
+                .add_enabled(
+                    st.has_vanilla_backup,
+                    epic_secondary_button(
+                        ph::ARROW_COUNTER_CLOCKWISE,
+                        "Restore Vanilla Textures",
+                    ),
+                )
+                .on_hover_text("Validates backup PNG checksums and restores vanilla sheets")
+                .clicked()
+            {
+                app.restore_vanilla_textures_async();
+            }
+            if ui
+                .add(epic_secondary_button(
+                    ph::MAGNIFYING_GLASS,
+                    "Scan PNG Integrity",
+                ))
+                .clicked()
+            {
+                app.ui_state.tools_subtab = 0;
+                app.run_health_check_async();
+            }
+        });
+    });
 }
 
 fn render_crashes(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
@@ -302,7 +579,125 @@ fn render_levels(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 }
 
 fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
+    let assets_st = app.assets_status.clone();
     card_frame().show(ui, |ui| {
+        // Practice Music & Custom Death SFX Audio Replacers
+        ui.spacing_mut().item_spacing.x = 12.0;
+        ui.columns(2, |cols| {
+            let col0_w = (cols[0].available_width() - 28.0).max(150.0);
+            inset_frame().show(&mut cols[0], |ui| {
+                ui.set_width(col0_w);
+                ui.set_max_width(col0_w);
+                ui.horizontal(|ui| {
+                    ui.label(bold_text("Practice Mode Music", 13.5, TEXT_PRIMARY));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        badge_pill(
+                            ui,
+                            if assets_st.practice_music_custom {
+                                "Custom Active"
+                            } else {
+                                "Vanilla"
+                            },
+                            if assets_st.practice_music_custom {
+                                ACCENT_EPIC_BRIGHT
+                            } else {
+                                STATUS_OK
+                            },
+                            if assets_st.practice_music_custom {
+                                ACCENT_EPIC_SOFT
+                            } else {
+                                STATUS_OK_SOFT
+                            },
+                        );
+                    });
+                });
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add(epic_secondary_button(
+                            ph::MUSIC_NOTE,
+                            "Replace StayInsideMe.mp3",
+                        ))
+                        .clicked()
+                    {
+                        if let Some(file) = rfd::FileDialog::new()
+                            .add_filter("MP3 Audio", &["mp3"])
+                            .pick_file()
+                        {
+                            app.replace_practice_music_async(file);
+                        }
+                    }
+                    if assets_st.practice_music_custom
+                        && ui
+                            .add(epic_secondary_button(
+                                ph::ARROW_COUNTER_CLOCKWISE,
+                                "Restore Vanilla",
+                            ))
+                            .clicked()
+                    {
+                        app.restore_practice_music_async();
+                    }
+                });
+            });
+
+            let col1_w = (cols[1].available_width() - 28.0).max(150.0);
+            inset_frame().show(&mut cols[1], |ui| {
+                ui.set_width(col1_w);
+                ui.set_max_width(col1_w);
+                ui.horizontal(|ui| {
+                    ui.label(bold_text("Custom Death SFX", 13.5, TEXT_PRIMARY));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        badge_pill(
+                            ui,
+                            if assets_st.death_sfx_custom {
+                                "Custom Active"
+                            } else {
+                                "Vanilla"
+                            },
+                            if assets_st.death_sfx_custom {
+                                ACCENT_EPIC_BRIGHT
+                            } else {
+                                STATUS_OK
+                            },
+                            if assets_st.death_sfx_custom {
+                                ACCENT_EPIC_SOFT
+                            } else {
+                                STATUS_OK_SOFT
+                            },
+                        );
+                    });
+                });
+                ui.add_space(6.0);
+                ui.horizontal_wrapped(|ui| {
+                    if ui
+                        .add(epic_secondary_button(
+                            ph::SPEAKER_HIGH,
+                            "Replace explode_11.ogg",
+                        ))
+                        .clicked()
+                    {
+                        if let Some(file) = rfd::FileDialog::new()
+                            .add_filter("Ogg Vorbis SFX", &["ogg"])
+                            .pick_file()
+                        {
+                            app.replace_death_sfx_async(file);
+                        }
+                    }
+                    if assets_st.death_sfx_custom
+                        && ui
+                            .add(epic_secondary_button(
+                                ph::ARROW_COUNTER_CLOCKWISE,
+                                "Restore Vanilla",
+                            ))
+                            .clicked()
+                    {
+                        app.restore_death_sfx_async();
+                    }
+                });
+            });
+        });
+
+        ui.add_space(12.0);
         // Header Row (Title & Badges on left, Action buttons below or right without overlap)
         ui.horizontal_wrapped(|ui| {
             ui.label(bold_text("NONG Song Library", 17.0, TEXT_PRIMARY));
@@ -418,12 +813,16 @@ fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         // Search, Sort & Filter Toolbar
         ui.horizontal_wrapped(|ui| {
             let search_w = (ui.available_width() - 410.0).clamp(210.0, 420.0);
-            styled_search_bar(
+            let search_resp = styled_search_bar(
                 ui,
                 &mut app.ui_state.song_search,
                 "Search songs, artists, levels, or IDs...",
                 search_w,
             );
+            if app.ui_state.focus_search_requested {
+                search_resp.request_focus();
+                app.ui_state.focus_search_requested = false;
+            }
 
             egui::ComboBox::from_id_salt("song_sort_combo")
                 .selected_text(format!("{} {}", ph::SORT_ASCENDING, app.ui_state.song_sort.label()))
@@ -691,10 +1090,10 @@ fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                                     action_copy_id = Some(song.id.clone());
                                                     ui.close_menu();
                                                 }
-                                                if ui.button("Show in File Explorer").clicked() {
-                                                    let _ = std::process::Command::new("explorer")
-                                                        .arg(format!("/select,{}", song.path))
-                                                        .spawn();
+                                                if ui.button("Show in File Manager").clicked() {
+                                                    reveal_file_in_file_manager(
+                                                        std::path::Path::new(&song.path),
+                                                    );
                                                     ui.close_menu();
                                                 }
                                             },

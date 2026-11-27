@@ -2,6 +2,7 @@ use eframe::egui::{self, RichText, Rounding, Stroke, Vec2};
 
 use crate::core::config::LaunchMode;
 use crate::core::logging;
+use crate::core::platform::open_in_file_manager;
 use crate::core::updater::current_app_display_version;
 use crate::launcher::process::build_launch_args;
 use crate::ui::app::GeodeDeckApp;
@@ -222,7 +223,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         ui.add_space(6.0);
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new("Redact Windows username paths in crash summaries")
+                RichText::new("Redact OS username paths in crash & support summaries")
                     .size(12.5)
                     .color(TEXT_PRIMARY),
             );
@@ -233,9 +234,63 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             });
         });
 
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("Discord Rich Presence (native IPC across Windows / Linux / macOS)")
+                    .size(12.5)
+                    .color(TEXT_PRIMARY),
+            );
+            let rpc_text = if !app.config.discord_rpc_enabled {
+                "Disabled"
+            } else if app.discord_rpc.is_connected() {
+                "Connected"
+            } else {
+                "Waiting for Discord"
+            };
+            status_dot_pill(
+                ui,
+                rpc_text,
+                if app.discord_rpc.is_connected() {
+                    STATUS_OK
+                } else {
+                    TEXT_MUTED
+                },
+                if app.discord_rpc.is_connected() {
+                    STATUS_OK_SOFT
+                } else {
+                    BG_ELEVATED
+                },
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if epic_toggle_switch(ui, &mut app.config.discord_rpc_enabled).changed() {
+                    app.discord_rpc.set_enabled(app.config.discord_rpc_enabled);
+                    changed = true;
+                }
+            });
+        });
+
         if changed {
             app.config.save();
         }
+    });
+
+    ui.add_space(14.0);
+
+    // === Keyboard Shortcuts Reference ===
+    card_frame().show(ui, |ui| {
+        ui.label(bold_text("Keyboard Shortcuts", 15.5, TEXT_PRIMARY));
+        ui.add_space(6.0);
+        ui.horizontal_wrapped(|ui| {
+            for (key, desc) in [
+                ("Ctrl+1..7", "Switch Sidebar Tab"),
+                ("Ctrl+F", "Focus Search Bar"),
+                ("Ctrl+H", "Run 8-Point Health Check"),
+                ("F5", "Refresh Workspace"),
+            ] {
+                badge_pill(ui, &format!("{key} · {desc}"), TEXT_PRIMARY, BG_ELEVATED);
+            }
+        });
     });
 
     ui.add_space(14.0);
@@ -401,7 +456,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 {
                     let p = logging::log_file_path();
                     if let Some(parent) = p.parent() {
-                        let _ = std::process::Command::new("explorer").arg(parent).spawn();
+                        open_in_file_manager(parent);
                     }
                 }
             });

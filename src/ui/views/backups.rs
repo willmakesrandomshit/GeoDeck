@@ -1,10 +1,13 @@
 use eframe::egui::{self, RichText, Rounding, Stroke};
 
-use crate::backup::crypto::dpapi_key_ready;
+use crate::backup::crypto::{dpapi_key_ready, vault_key_protection_label};
+use crate::backup::save_tools::delete_save_slot;
 use crate::backup::vault::{
     export_snapshot_portable_zip, import_backup_folder_into_vault, import_portable_zip_into_vault,
     verify_snapshot_integrity,
 };
+use crate::core::platform::open_in_file_manager;
+use crate::geode::package::local_gd_data_dir;
 use crate::launcher::detection::human_bytes;
 use crate::ui::app::GeodeDeckApp;
 use crate::ui::icons::ph;
@@ -15,8 +18,28 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     section_heading(
         ui,
         "Encrypted Save Vault & Backups",
-        "DPAPI-protected AES-256-GCM snapshots with pre-backup XML verification and zero credential exposure.",
+        "DPAPI-protected AES-256-GCM snapshots, Save Slots, Save Doctor salvage, Save Compactor, and portable .geodesync bundles.",
     );
+
+    epic_subtab_bar(
+        ui,
+        &[
+            (ph::SHIELD_CHECK, "Encrypted Vault"),
+            (ph::HARD_DRIVES, "Save Slots & Salvage"),
+            (ph::PACKAGE, "Compactor & .geodesync"),
+        ],
+        &mut app.ui_state.backups_subtab,
+    );
+
+    if app.ui_state.backups_subtab == 1 {
+        render_slots_and_salvage(app, ui);
+        return;
+    }
+    if app.ui_state.backups_subtab == 2 {
+        render_compactor_and_bundles(app, ui);
+        return;
+    }
+
     ui.horizontal_wrapped(|ui| {
         ui.spacing_mut().item_spacing.x = 8.0;
         if ui
@@ -58,13 +81,11 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         }
         if ui
             .add(epic_secondary_button(ph::FOLDER_OPEN, "Open Vault"))
-            .on_hover_text("Open the vault directory in File Explorer")
+            .on_hover_text("Open the vault directory")
             .clicked()
         {
             let _ = std::fs::create_dir_all(&app.config.backup_dir);
-            let _ = std::process::Command::new("explorer")
-                .arg(&app.config.backup_dir)
-                .spawn();
+            open_in_file_manager(std::path::Path::new(&app.config.backup_dir));
         }
     });
 
@@ -101,11 +122,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             } else {
                 "Plaintext"
             },
-            if dpapi_active {
-                "Windows DPAPI active"
-            } else {
-                "DPAPI key ready"
-            },
+            vault_key_protection_label(),
             STATUS_OK,
         );
         stat_tile(
@@ -725,7 +742,10 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             });
     });
 
-    // === Restore Confirmation Modal Dialog ===
+    render_backup_modals(app, ui);
+}
+
+fn render_backup_modals(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     if let Some(snap) = app.ui_state.pending_restore_snapshot.clone() {
         modal_backdrop(ui.ctx(), "restore_modal_bg");
         egui::Area::new(egui::Id::new("restore_modal_fg"))
@@ -837,4 +857,312 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 });
             });
     }
+}
+
+fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing.x = 14.0;
+    ui.columns(2, |cols| {
+        let col0_w = (cols[0].available_width() - 42.0).max(180.0);
+        card_frame().show(&mut cols[0], |ui| {
+            ui.set_width(col0_w);
+            ui.set_max_width(col0_w);
+            ui.set_min_height(380.0);
+            ui.label(bold_text("Save Slots (Multi-Profile)", 15.5, TEXT_PRIMARY));
+            ui.label(
+                RichText::new("Switch cleanly between main, challenge, or creator save states.")
+                    .size(12.0)
+                    .color(TEXT_SECONDARY),
+            );
+            ui.add_space(10.0);
+            ui.horizontal_wrapped(|ui| {
+                styled_text_input(
+                    ui,
+                    &mut app.ui_state.new_save_slot_name,
+                    "New Slot Name...",
+                    (col0_w - 150.0).max(120.0),
+                );
+                if ui
+                    .add(epic_cta_button(ph::PLUS, "Create Slot"))
+                    .clicked()
+                {
+                    app.create_save_slot_action();
+                }
+            });
+            ui.add_space(10.0);
+
+            if app.save_slots.is_empty() {
+                empty_state_card(
+                    ui,
+                    ph::HARD_DRIVES,
+                    "No Save Slots Created",
+                    "Enter a slot name above to snapshot your current save into a switchable profile.",
+                );
+            } else {
+                for slot in app.save_slots.clone() {
+                    elevated_card_frame().show(ui, |ui| {
+                        ui.set_width((col0_w - 28.0).max(140.0));
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_max_width((col0_w - 190.0).max(100.0));
+                                ui.label(bold_text(&slot.name, 13.5, TEXT_PRIMARY));
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{}  ·  {}★  ·  {} Demons",
+                                        slot.player_name, slot.stars, slot.demons
+                                    ))
+                                    .size(11.5)
+                                    .color(TEXT_MUTED),
+                                );
+                            });
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                if ui.add(epic_danger_button(ph::TRASH, "")).clicked() {
+                                    match delete_save_slot(&local_gd_data_dir(), &slot.name) {
+                                        Ok(msg) => {
+                                            app.push_toast(
+                                                crate::core::worker::ToastKind::Info,
+                                                "Slot Deleted",
+                                                msg,
+                                            );
+                                            app.refresh_backups_async();
+                                        }
+                                        Err(e) => app.push_toast(
+                                            crate::core::worker::ToastKind::Error,
+                                            "Delete Failed",
+                                            e,
+                                        ),
+                                    }
+                                }
+                                if ui
+                                    .add(epic_cta_button(ph::ARROW_CLOCKWISE, "Switch"))
+                                    .clicked()
+                                {
+                                    app.switch_save_slot_async(slot.name.clone());
+                                }
+                            });
+                        });
+                    });
+                    ui.add_space(6.0);
+                }
+            }
+        });
+
+        let col1_w = (cols[1].available_width() - 42.0).max(180.0);
+        card_frame().show(&mut cols[1], |ui| {
+            ui.set_width(col1_w);
+            ui.set_max_width(col1_w);
+            ui.set_min_height(380.0);
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.set_max_width((col1_w - 130.0).max(110.0));
+                    ui.label(bold_text("Save Doctor & Salvage", 15.5, TEXT_PRIMARY));
+                    ui.label(
+                        RichText::new("Auto-discover valid CCGameManager backups & resurrect corrupted saves.")
+                            .size(11.5)
+                            .color(TEXT_SECONDARY),
+                    );
+                });
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .add(epic_secondary_button(ph::ARROWS_CLOCKWISE, "Scan"))
+                        .clicked()
+                    {
+                        app.refresh_backups_async();
+                    }
+                });
+            });
+            ui.add_space(10.0);
+
+            if app.salvage_candidates.is_empty() {
+                empty_state_card(
+                    ui,
+                    ph::SHIELD_CHECK,
+                    "No Salvage Files Found",
+                    "Decoded CCGameManager*.dat and .bak candidates will appear here.",
+                );
+            } else {
+                egui::ScrollArea::vertical()
+                    .max_height(320.0)
+                    .show(ui, |ui| {
+                        for cand in app.salvage_candidates.clone() {
+                            elevated_card_frame().show(ui, |ui| {
+                                ui.set_width((col1_w - 34.0).max(140.0));
+                                ui.horizontal(|ui| {
+                                    ui.vertical(|ui| {
+                                        ui.set_max_width((col1_w - 160.0).max(100.0));
+                                        ui.add(
+                                            egui::Label::new(bold_text(
+                                                &cand.relative_path,
+                                                12.5,
+                                                TEXT_PRIMARY,
+                                            ))
+                                            .truncate(),
+                                        );
+                                        ui.label(
+                                            RichText::new(format!(
+                                                "{} · {}★ · {} · {}",
+                                                cand.player_name,
+                                                cand.stars,
+                                                human_bytes(cand.size_bytes),
+                                                cand.modified_str
+                                            ))
+                                            .size(11.0)
+                                            .color(TEXT_MUTED),
+                                        );
+                                    });
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if ui
+                                                .add(epic_cta_button(
+                                                    ph::ARROW_COUNTER_CLOCKWISE,
+                                                    "Resurrect",
+                                                ))
+                                                .clicked()
+                                            {
+                                                app.resurrect_save_async(cand.path.clone());
+                                            }
+                                        },
+                                    );
+                                });
+                            });
+                            ui.add_space(5.0);
+                        }
+                    });
+            }
+        });
+    });
+}
+
+fn render_compactor_and_bundles(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
+    ui.spacing_mut().item_spacing.x = 14.0;
+    ui.columns(2, |cols| {
+        let col0_w = (cols[0].available_width() - 42.0).max(180.0);
+        card_frame().show(&mut cols[0], |ui| {
+            ui.set_width(col0_w);
+            ui.set_max_width(col0_w);
+            ui.set_min_height(310.0);
+            ui.label(bold_text("Save Bloat Compactor", 15.5, TEXT_PRIMARY));
+            ui.label(
+                RichText::new("Purge cached online level data from CCLocalLevels.dat while keeping every editor level you built.")
+                    .size(12.0)
+                    .color(TEXT_SECONDARY),
+            );
+            ui.add_space(12.0);
+            if let Some(ref b) = app.save_bloat {
+                elevated_card_frame().show(ui, |ui| {
+                    ui.set_width((col0_w - 28.0).max(140.0));
+                    ui.label(bold_text(
+                        &format!("CCLocalLevels.dat: {}", human_bytes(b.file_size_bytes)),
+                        14.0,
+                        TEXT_PRIMARY,
+                    ));
+                    ui.add_space(4.0);
+                    ui.horizontal_wrapped(|ui| {
+                        badge_pill(
+                            ui,
+                            &format!("{} Total Entries", b.total_levels),
+                            TEXT_PRIMARY,
+                            BG_SURFACE,
+                        );
+                        badge_pill(
+                            ui,
+                            &format!("{} User Created", b.user_created),
+                            STATUS_OK,
+                            STATUS_OK_SOFT,
+                        );
+                        badge_pill(
+                            ui,
+                            &format!("{} Cached Online Bloat", b.online_cached),
+                            if b.online_cached > 0 {
+                                STATUS_WARN
+                            } else {
+                                TEXT_MUTED
+                            },
+                            if b.online_cached > 0 {
+                                STATUS_WARN_SOFT
+                            } else {
+                                BG_SURFACE
+                            },
+                        );
+                    });
+                });
+            } else {
+                empty_state_card(
+                    ui,
+                    ph::LAYERS,
+                    "Save Bloat Report Unavailable",
+                    "CCLocalLevels.dat was not found or could not be decoded.",
+                );
+            }
+            ui.add_space(12.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add(epic_cta_button(ph::WRENCH, "Compact Save Now"))
+                    .on_hover_text("Creates timestamped .bak first, then strips cached online levels")
+                    .clicked()
+                {
+                    app.compact_save_bloat_async();
+                }
+                if ui
+                    .add(epic_secondary_button(ph::ARROWS_CLOCKWISE, "Re-Analyze"))
+                    .clicked()
+                {
+                    app.refresh_backups_async();
+                }
+            });
+        });
+
+        let col1_w = (cols[1].available_width() - 42.0).max(180.0);
+        card_frame().show(&mut cols[1], |ui| {
+            ui.set_width(col1_w);
+            ui.set_max_width(col1_w);
+            ui.set_min_height(310.0);
+            ui.label(bold_text("Portable .geodesync Bundles", 15.5, TEXT_PRIMARY));
+            ui.label(
+                RichText::new("Transfer or restore complete setups (.dat saves, .geode mods, and mod configs) in one file.")
+                    .size(12.0)
+                    .color(TEXT_SECONDARY),
+            );
+            ui.add_space(10.0);
+            for (lbl, flag) in [
+                ("Include GD Save Files (.dat)", &mut app.ui_state.bundle_include_saves),
+                ("Include Geode Mods (.geode)", &mut app.ui_state.bundle_include_mods),
+                ("Include Mod Configurations", &mut app.ui_state.bundle_include_configs),
+            ] {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(lbl).size(12.5).color(TEXT_PRIMARY));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        epic_toggle_switch(ui, flag);
+                    });
+                });
+                ui.add_space(6.0);
+            }
+            ui.add_space(10.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add(epic_cta_button(ph::EXPORT, "Export .geodesync"))
+                    .clicked()
+                {
+                    if let Some(dst) = rfd::FileDialog::new()
+                        .set_file_name("GeoDeck_Setup.geodesync")
+                        .add_filter("GeodeSync Bundle", &["geodesync", "zip"])
+                        .save_file()
+                    {
+                        app.export_bundle_async(dst);
+                    }
+                }
+                if ui
+                    .add(epic_secondary_button(ph::UPLOAD_SIMPLE, "Import .geodesync"))
+                    .clicked()
+                {
+                    if let Some(src) = rfd::FileDialog::new()
+                        .add_filter("GeodeSync Bundle", &["geodesync", "zip"])
+                        .pick_file()
+                    {
+                        app.import_bundle_async(src);
+                    }
+                }
+            });
+        });
+    });
 }

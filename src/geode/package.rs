@@ -73,10 +73,7 @@ pub struct InstalledMod {
 }
 
 pub fn local_gd_data_dir() -> PathBuf {
-    std::env::var_os("LOCALAPPDATA")
-        .map(PathBuf::from)
-        .unwrap_or_else(std::env::temp_dir)
-        .join("GeometryDash")
+    crate::core::platform::resolve_gd_save_dir(None)
 }
 
 pub fn geode_loader_saved_path(local_data_dir: &Path) -> PathBuf {

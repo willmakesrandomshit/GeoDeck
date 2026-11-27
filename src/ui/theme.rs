@@ -43,30 +43,51 @@ pub const STATUS_WARN_SOFT: Color32 = Color32::from_rgb(52, 39, 19);
 pub const STATUS_ERR: Color32 = Color32::from_rgb(248, 113, 113);
 pub const STATUS_ERR_SOFT: Color32 = Color32::from_rgb(54, 24, 28);
 
+fn read_first_existing_font(candidates: &[&str]) -> Option<Vec<u8>> {
+    for p in candidates {
+        if let Ok(bytes) = std::fs::read(Path::new(p)) {
+            return Some(bytes);
+        }
+    }
+    None
+}
+
 pub fn setup_fonts_and_theme(ctx: &egui::Context) {
     let mut fonts = FontDefinitions::default();
 
-    if let Ok(bytes) = std::fs::read(Path::new(r"C:\Windows\Fonts\segoeui.ttf")) {
+    let regular_bytes = read_first_existing_font(&[
+        r"C:\Windows\Fonts\segoeui.ttf",
+        "/System/Library/Fonts/SFNS.ttf",
+        "/System/Library/Fonts/HelveticaNeue.ttc",
+        "/Library/Fonts/Arial.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+    ]);
+    if let Some(bytes) = regular_bytes {
         fonts
             .font_data
-            .insert("segoe_ui".into(), FontData::from_owned(bytes));
+            .insert("ui_regular".into(), FontData::from_owned(bytes));
         if let Some(fam) = fonts.families.get_mut(&FontFamily::Proportional) {
-            fam.insert(0, "segoe_ui".into());
+            fam.insert(0, "ui_regular".into());
         }
     }
 
-    let semibold_path = if Path::new(r"C:\Windows\Fonts\seguisb.ttf").is_file() {
-        r"C:\Windows\Fonts\seguisb.ttf"
-    } else {
-        r"C:\Windows\Fonts\segoeuib.ttf"
-    };
-    if let Ok(bytes) = std::fs::read(semibold_path) {
+    let semibold_bytes = read_first_existing_font(&[
+        r"C:\Windows\Fonts\seguisb.ttf",
+        r"C:\Windows\Fonts\segoeuib.ttf",
+        "/System/Library/Fonts/SFNS.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ]);
+    if let Some(bytes) = semibold_bytes {
         fonts
             .font_data
-            .insert("segoe_semibold".into(), FontData::from_owned(bytes));
+            .insert("ui_semibold".into(), FontData::from_owned(bytes));
         fonts.families.insert(
             FontFamily::Name("semibold".into()),
-            vec!["segoe_semibold".into()],
+            vec!["ui_semibold".into()],
         );
     } else {
         fonts.families.insert(
@@ -79,18 +100,21 @@ pub fn setup_fonts_and_theme(ctx: &egui::Context) {
         );
     }
 
-    let bold_font_path = if Path::new(r"C:\Windows\Fonts\segoeuib.ttf").is_file() {
-        r"C:\Windows\Fonts\segoeuib.ttf"
-    } else {
-        semibold_path
-    };
-    if let Ok(bytes) = std::fs::read(bold_font_path) {
+    let bold_bytes = read_first_existing_font(&[
+        r"C:\Windows\Fonts\segoeuib.ttf",
+        r"C:\Windows\Fonts\seguisb.ttf",
+        "/System/Library/Fonts/SFNS.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf",
+    ]);
+    if let Some(bytes) = bold_bytes {
         fonts
             .font_data
-            .insert("segoe_bold".into(), FontData::from_owned(bytes));
+            .insert("ui_bold".into(), FontData::from_owned(bytes));
         fonts.families.insert(
             FontFamily::Name("bold".into()),
-            vec!["segoe_bold".into()],
+            vec!["ui_bold".into()],
         );
     } else {
         fonts.families.insert(
@@ -103,18 +127,20 @@ pub fn setup_fonts_and_theme(ctx: &egui::Context) {
         );
     }
 
-    let display_path = if Path::new(r"C:\Windows\Fonts\seguibl.ttf").is_file() {
-        r"C:\Windows\Fonts\seguibl.ttf"
-    } else {
-        bold_font_path
-    };
-    if let Ok(bytes) = std::fs::read(display_path) {
+    let display_bytes = read_first_existing_font(&[
+        r"C:\Windows\Fonts\seguibl.ttf",
+        r"C:\Windows\Fonts\segoeuib.ttf",
+        "/System/Library/Fonts/SFNS.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        "/usr/share/fonts/truetype/noto/NotoSans-Bold.ttf",
+    ]);
+    if let Some(bytes) = display_bytes {
         fonts
             .font_data
-            .insert("segoe_black".into(), FontData::from_owned(bytes));
+            .insert("ui_black".into(), FontData::from_owned(bytes));
         fonts.families.insert(
             FontFamily::Name("display".into()),
-            vec!["segoe_black".into()],
+            vec!["ui_black".into()],
         );
     } else {
         fonts.families.insert(
@@ -127,12 +153,19 @@ pub fn setup_fonts_and_theme(ctx: &egui::Context) {
         );
     }
 
-    if let Ok(bytes) = std::fs::read(Path::new(r"C:\Windows\Fonts\consola.ttf")) {
+    let mono_bytes = read_first_existing_font(&[
+        r"C:\Windows\Fonts\consola.ttf",
+        "/System/Library/Fonts/Menlo.ttc",
+        "/System/Library/Fonts/SFNSMono.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
+        "/usr/share/fonts/truetype/liberation/LiberationMono-Regular.ttf",
+    ]);
+    if let Some(bytes) = mono_bytes {
         fonts
             .font_data
-            .insert("consolas".into(), FontData::from_owned(bytes));
+            .insert("ui_mono".into(), FontData::from_owned(bytes));
         if let Some(fam) = fonts.families.get_mut(&FontFamily::Monospace) {
-            fam.insert(0, "consolas".into());
+            fam.insert(0, "ui_mono".into());
         }
     }
 
@@ -658,9 +691,12 @@ pub fn epic_subtab_bar(ui: &mut egui::Ui, tabs: &[(&str, &str)], active_idx: &mu
                             Stroke::NONE
                         })
                         .rounding(Rounding::same(RADIUS_BUTTON))
-                        .inner_margin(Margin::symmetric(14.0, 7.0))
+                        .inner_margin(Margin::symmetric(12.0, 6.0))
                         .show(ui, |ui| {
-                            ui.label(semibold_text(title, 13.0, fg));
+                            ui.add(
+                                egui::Label::new(semibold_text(title, 12.5, fg))
+                                    .wrap_mode(egui::TextWrapMode::Extend),
+                            );
                         })
                         .response
                         .interact(egui::Sense::click());

@@ -4,6 +4,11 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 use crate::backup::save_inspector::{inspect_save_dir, SaveSummary};
+use crate::backup::save_tools::{
+    analyze_save_bloat, clean_save_bloat, create_save_slot, export_geodesync_bundle,
+    find_salvageable_saves, import_geodesync_bundle, list_save_slots, resurrect_save,
+    switch_save_slot, SalvageCandidate, SaveBloatReport, SaveSlotInfo,
+};
 use crate::backup::scheduler::{run_auto_backup_if_changed, BackupScheduler};
 use crate::backup::vault::{
     create_snapshot, detect_legacy_external_backups, list_snapshots, restore_snapshot,
@@ -11,28 +16,47 @@ use crate::backup::vault::{
 };
 use crate::core::config::{Config, GameInstallation, LaunchMode, OptimizationPreset};
 use crate::core::logging;
+use crate::core::platform::open_url;
+use crate::core::presence::DiscordRpcHandle;
 use crate::core::updater::{
     check_github_updates, current_app_display_version, download_and_verify_update,
     UpdateCheckResult,
 };
-use crate::core::worker::{spawn_job, ModUpdateAvailable, ToastKind, WorkerBus, WorkerEvent};
+use crate::core::worker::{
+    spawn_job, ModUpdateAvailable, RefreshKind, ToastKind, WorkerBus, WorkerEvent,
+};
 use crate::geode::dependency::{audit_mods, CompatibilityAudit};
 use crate::geode::exporter::{export_gdpack, import_gdpack};
 use crate::geode::index_api::{
     check_updates_for_installed, fetch_latest_loader_release, fetch_mod_logo_rgba,
-    install_mod_from_index, install_mod_version, install_or_update_geode_loader, search_index_mods,
-    IndexMod, IndexModVersion, LoaderRelease,
+    install_mod_from_index, install_mod_version, install_or_update_geode_loader,
+    install_specific_mod_version, search_index_mods, IndexMod, IndexModVersion, LoaderRelease,
 };
+use crate::geode::keybinds::{scan_keybind_conflicts, KeybindReport};
 use crate::geode::package::{local_gd_data_dir, scan_installed_mods, InstalledMod};
-use crate::geode::profiles::apply_mod_profile;
-use crate::launcher::detection::{probe_installation, InstallationProbe};
+use crate::geode::profiles::{apply_mod_profile, apply_quick_mod_preset, QuickModPreset};
+use crate::launcher::detection::{
+    find_all_gd_installations, probe_installation, DiscoveredInstall, InstallationProbe,
+};
 use crate::launcher::integrity::{verify_installation, IntegrityReport};
 use crate::launcher::process::{launch_game, terminate_gd_process, ActiveSession};
 use crate::launcher::versions::{
     create_isolated_snapshot, find_downloaded_steam_depots, import_depot_as_slot,
+    is_manifest_locked, set_manifest_locked,
 };
-use crate::optimizer::tweaks::apply_preset;
+use crate::optimizer::tweaks::{
+    apply_preset, clean_geode_caches, measure_geode_caches, CacheSizes,
+};
+use crate::tools::assets_manager::{
+    backup_vanilla_textures, get_assets_status, install_texture_pack, restore_vanilla_death_sfx,
+    restore_vanilla_practice_music, restore_vanilla_textures, set_custom_death_sfx,
+    set_custom_practice_music, TexturePackStatus,
+};
 use crate::tools::crash_analyzer::{scan_crash_logs, CrashReport};
+use crate::tools::demonlist::{fetch_pointercrate_demons, PointercrateDemon};
+use crate::tools::diagnostics::{
+    ensure_local_onedrive_files, scan_installation_issues, DiagnosticFinding,
+};
 use crate::tools::songs::{
     apply_metadata_to_report, default_song_metadata_cache_path, merge_save_metadata_into_cache,
     resolve_missing_song_metadata, scan_song_cache, SongCacheReport, SongFormatFilter,
@@ -50,6 +74,7 @@ pub enum NavTab {
     Home,
     Library,
     Mods,
+    Demonlist,
     Backups,
     Tools,
     Settings,
@@ -74,6 +99,8 @@ pub struct ToastItem {
 pub struct UiTransientState {
     pub library_subtab: usize,
     pub tools_subtab: usize,
+    pub backups_subtab: usize,
+    pub demonlist_subtab: usize,
     pub new_slot_name: String,
     pub clone_include_mods: bool,
     pub selected_depot_idx: usize,
@@ -85,12 +112,20 @@ pub struct UiTransientState {
     pub index_sort: String,
     pub index_match_gd: bool,
     pub index_featured_only: bool,
+    pub index_category: usize,
     pub index_page: usize,
+    pub demon_search: String,
     pub new_profile_name: String,
     pub profile_snapshot_settings: bool,
     pub export_pack_name: String,
     pub export_only_enabled: bool,
     pub export_include_configs: bool,
+    pub new_save_slot_name: String,
+    pub bundle_include_saves: bool,
+    pub bundle_include_mods: bool,
+    pub bundle_include_configs: bool,
+    pub error_explainer_input: String,
+    pub error_explainer_result: Option<(String, String)>,
     pub pending_restore_snapshot: Option<SnapshotSummary>,
     pub pending_delete_snapshot: Option<SnapshotSummary>,
     pub restore_include_configs: bool,
@@ -103,6 +138,7 @@ pub struct UiTransientState {
     pub song_status_filter: SongStatusFilter,
     pub rename_song_modal: Option<(String, String, String, bool)>,
     pub log_level_filter: usize,
+    pub focus_search_requested: bool,
 }
 
 impl Default for UiTransientState {
@@ -110,6 +146,8 @@ impl Default for UiTransientState {
         Self {
             library_subtab: 0,
             tools_subtab: 0,
+            backups_subtab: 0,
+            demonlist_subtab: 0,
             new_slot_name: format!("GD_Slot_{}", chrono::Local::now().format("%Y%m%d")),
             clone_include_mods: true,
             selected_depot_idx: 0,
@@ -121,12 +159,20 @@ impl Default for UiTransientState {
             index_sort: "downloads".into(),
             index_match_gd: true,
             index_featured_only: false,
+            index_category: 0,
             index_page: 1,
+            demon_search: String::new(),
             new_profile_name: String::new(),
             profile_snapshot_settings: true,
             export_pack_name: "MyGeodePack".into(),
             export_only_enabled: false,
             export_include_configs: true,
+            new_save_slot_name: String::new(),
+            bundle_include_saves: true,
+            bundle_include_mods: true,
+            bundle_include_configs: true,
+            error_explainer_input: String::new(),
+            error_explainer_result: None,
             pending_restore_snapshot: None,
             pending_delete_snapshot: None,
             restore_include_configs: true,
@@ -139,6 +185,7 @@ impl Default for UiTransientState {
             song_status_filter: SongStatusFilter::All,
             rename_song_modal: None,
             log_level_filter: 0,
+            focus_search_requested: false,
         }
     }
 }
@@ -150,17 +197,21 @@ pub struct GeodeDeckApp {
     pub nav_forward_stack: Vec<NavTab>,
     pub bus: WorkerBus,
     pub egui_ctx: Option<egui::Context>,
+    pub discord_rpc: DiscordRpcHandle,
 
     pub probe: InstallationProbe,
     pub integrity_report: IntegrityReport,
     pub downloaded_depots: Vec<PathBuf>,
+    pub discovered_installs: Vec<DiscoveredInstall>,
     pub latest_loader_release: Option<LoaderRelease>,
+    pub manifest_locked: bool,
 
     pub installed_mods: Vec<InstalledMod>,
     pub mod_audit: CompatibilityAudit,
     pub mod_updates: Vec<ModUpdateAvailable>,
     pub index_results: Vec<IndexMod>,
     pub index_total: usize,
+    pub keybind_report: KeybindReport,
 
     // Texture caches
     pub brand_lockup: Option<TextureHandle>,
@@ -178,11 +229,21 @@ pub struct GeodeDeckApp {
     pub save_summary: Option<SaveSummary>,
     pub legacy_backups: Vec<(String, PathBuf)>,
     pub backup_scheduler: BackupScheduler,
+    pub save_bloat: Option<SaveBloatReport>,
+    pub save_slots: Vec<SaveSlotInfo>,
+    pub salvage_candidates: Vec<SalvageCandidate>,
 
     pub crash_reports: Vec<CrashReport>,
     pub song_report: SongCacheReport,
     pub song_metadata_resolving: bool,
     pub in_flight_song_ids: HashSet<String>,
+    pub demonlist: Vec<PointercrateDemon>,
+    pub demonlist_loading: bool,
+    pub demonlist_error: Option<String>,
+    pub health_findings: Vec<DiagnosticFinding>,
+    pub health_checking: bool,
+    pub assets_status: TexturePackStatus,
+    pub cache_sizes: CacheSizes,
     pub app_update_result: Option<Result<UpdateCheckResult, String>>,
     pub update_banner_dismissed: bool,
 
@@ -238,6 +299,10 @@ impl GeodeDeckApp {
             ui_state.tools_subtab = sub;
         }
 
+        let discord_rpc = DiscordRpcHandle::new(config.discord_rpc_enabled);
+        let manifest_locked = is_manifest_locked(&config.game_path);
+        let assets_status = get_assets_status(&config.game_path);
+
         let mut app = Self {
             config,
             active_tab: initial_tab.unwrap_or(NavTab::Home),
@@ -245,17 +310,21 @@ impl GeodeDeckApp {
             nav_forward_stack: Vec::new(),
             bus: WorkerBus::new(),
             egui_ctx: Some(cc.egui_ctx.clone()),
+            discord_rpc,
 
             probe: InstallationProbe::default(),
             integrity_report: IntegrityReport::default(),
             downloaded_depots: find_downloaded_steam_depots(),
+            discovered_installs: Vec::new(),
             latest_loader_release: None,
+            manifest_locked,
 
             installed_mods: Vec::new(),
             mod_audit: CompatibilityAudit::default(),
             mod_updates: Vec::new(),
             index_results: Vec::new(),
             index_total: 0,
+            keybind_report: KeybindReport::default(),
 
             brand_lockup,
             brand_icon,
@@ -272,11 +341,21 @@ impl GeodeDeckApp {
             save_summary: None,
             legacy_backups: Vec::new(),
             backup_scheduler: BackupScheduler::new(),
+            save_bloat: None,
+            save_slots: Vec::new(),
+            salvage_candidates: Vec::new(),
 
             crash_reports: Vec::new(),
             song_report: SongCacheReport::default(),
             song_metadata_resolving: false,
             in_flight_song_ids: HashSet::new(),
+            demonlist: Vec::new(),
+            demonlist_loading: false,
+            demonlist_error: None,
+            health_findings: Vec::new(),
+            health_checking: false,
+            assets_status,
+            cache_sizes: CacheSizes::default(),
             app_update_result: None,
             update_banner_dismissed: false,
 
@@ -296,8 +375,12 @@ impl GeodeDeckApp {
         app.apply_max_performance_async();
         app.refresh_all_async();
         app.search_geode_index_async();
-        if app.config.check_updates_on_startup && app.capture_output.is_none() {
-            app.check_app_update_silent_async();
+        app.run_health_check_async();
+        if app.capture_output.is_none() {
+            app.refresh_demonlist_async();
+            if app.config.check_updates_on_startup {
+                app.check_app_update_silent_async();
+            }
         }
         app.initialized = true;
         app
@@ -453,10 +536,338 @@ impl GeodeDeckApp {
 
     pub fn refresh_probe_async(&mut self) {
         let path = self.config.game_path.clone();
+        self.manifest_locked = is_manifest_locked(&path);
         spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
             let probe = probe_installation(&path);
             let _ = tx.send(WorkerEvent::ProbeCompleted(probe));
         });
+    }
+
+    pub fn scan_discovered_installs_async(&mut self) {
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let found = find_all_gd_installations();
+            let _ = tx.send(WorkerEvent::InstallsScanned(found));
+        });
+    }
+
+    pub fn toggle_manifest_lock_action(&mut self) {
+        let target = !self.manifest_locked;
+        match set_manifest_locked(&self.config.game_path, target) {
+            Ok(msg) => {
+                self.manifest_locked = is_manifest_locked(&self.config.game_path);
+                self.push_toast(ToastKind::Success, "Steam Update Lock", msg);
+            }
+            Err(e) => self.push_toast(ToastKind::Error, "Manifest Lock Failed", e),
+        }
+    }
+
+    pub fn apply_quick_preset_async(&mut self, preset: QuickModPreset) {
+        self.config.active_mod_preset = preset.label().into();
+        self.config.save();
+        let game = self.config.game_path.clone();
+        self.busy_label = Some(format!("Applying {} preset...", preset.label()));
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = apply_quick_mod_preset(preset, &game, &local_gd_data_dir());
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Mod Preset".into(),
+                result: res,
+                refresh: RefreshKind::Mods,
+            });
+        });
+    }
+
+    pub fn downgrade_mod_version_async(&mut self, mod_id: String, target_ver: String) {
+        self.busy_label = Some(format!("Installing {mod_id} v{target_ver}..."));
+        let game = self.config.game_path.clone();
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = install_specific_mod_version(&game, &mod_id, &target_ver);
+            let _ = tx.send(WorkerEvent::ModInstallFinished {
+                mod_id,
+                result: res,
+            });
+        });
+    }
+
+    pub fn refresh_demonlist_async(&mut self) {
+        if self.demonlist_loading {
+            return;
+        }
+        self.demonlist_loading = true;
+        self.demonlist_error = None;
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = fetch_pointercrate_demons(150);
+            let _ = tx.send(WorkerEvent::DemonlistFetched(res));
+        });
+    }
+
+    pub fn run_health_check_async(&mut self) {
+        if self.health_checking {
+            return;
+        }
+        self.health_checking = true;
+        let game = self.config.game_path.clone();
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let save_dir = local_gd_data_dir();
+            let findings = scan_installation_issues(&game, &save_dir);
+            let _ = tx.send(WorkerEvent::HealthCheckCompleted(findings));
+            let cache = measure_geode_caches(&game);
+            let _ = tx.send(WorkerEvent::CacheSizesMeasured(cache));
+        });
+    }
+
+    pub fn scan_keybinds_async(&mut self) {
+        let game = self.config.game_path.clone();
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let rep = scan_keybind_conflicts(&game, &local_gd_data_dir());
+            let _ = tx.send(WorkerEvent::KeybindsScanned(rep));
+        });
+    }
+
+    pub fn clean_geode_caches_async(&mut self) {
+        let game = self.config.game_path.clone();
+        self.busy_label = Some("Cleaning Geode temp & old logs...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = clean_geode_caches(&game).map(|bytes| {
+                format!(
+                    "Reclaimed {} of Geode temporary cache and old logs.",
+                    crate::launcher::detection::human_bytes(bytes)
+                )
+            });
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Cache Cleaner".into(),
+                result: res,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn pin_onedrive_local_async(&mut self) {
+        let game = self.config.game_path.clone();
+        self.busy_label = Some("Pinning OneDrive files locally...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let mut msg = ensure_local_onedrive_files(Path::new(&game));
+            let save = local_gd_data_dir();
+            if save.to_string_lossy().to_lowercase().contains("onedrive") {
+                msg = ensure_local_onedrive_files(&save);
+            }
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "OneDrive Pin".into(),
+                result: msg,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn install_texture_pack_async(&mut self, src: PathBuf) {
+        let game = self.config.game_path.clone();
+        self.busy_label = Some("Installing texture pack...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = install_texture_pack(&game, &src, None);
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Texture Pack".into(),
+                result: res,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn backup_vanilla_textures_async(&mut self) {
+        let game = self.config.game_path.clone();
+        self.busy_label = Some("Backing up vanilla textures...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = backup_vanilla_textures(&game);
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Vanilla Texture Backup".into(),
+                result: res,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn restore_vanilla_textures_async(&mut self) {
+        let game = self.config.game_path.clone();
+        self.busy_label = Some("Validating & restoring vanilla textures...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = restore_vanilla_textures(&game);
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Restore Vanilla Textures".into(),
+                result: res,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn replace_practice_music_async(&mut self, audio: PathBuf) {
+        let game = self.config.game_path.clone();
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = set_custom_practice_music(&game, &audio);
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Practice Music".into(),
+                result: res,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn restore_practice_music_async(&mut self) {
+        let game = self.config.game_path.clone();
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = restore_vanilla_practice_music(&game);
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Practice Music".into(),
+                result: res,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn replace_death_sfx_async(&mut self, audio: PathBuf) {
+        let game = self.config.game_path.clone();
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = set_custom_death_sfx(&game, &audio);
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Custom Death SFX".into(),
+                result: res,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn restore_death_sfx_async(&mut self) {
+        let game = self.config.game_path.clone();
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = restore_vanilla_death_sfx(&game);
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Custom Death SFX".into(),
+                result: res,
+                refresh: RefreshKind::Tools,
+            });
+        });
+    }
+
+    pub fn compact_save_bloat_async(&mut self) {
+        self.busy_label = Some("Compacting CCLocalLevels.dat...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = clean_save_bloat(&local_gd_data_dir()).map(|r| {
+                format!(
+                    "Removed {} cached online level(s). Size: {} -> {}",
+                    r.removed_levels,
+                    crate::launcher::detection::human_bytes(r.old_size_bytes),
+                    crate::launcher::detection::human_bytes(r.new_size_bytes)
+                )
+            });
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Save Compactor".into(),
+                result: res,
+                refresh: RefreshKind::Backups,
+            });
+        });
+    }
+
+    pub fn create_save_slot_action(&mut self) {
+        let name = self.ui_state.new_save_slot_name.trim().to_string();
+        match create_save_slot(&local_gd_data_dir(), &name) {
+            Ok(msg) => {
+                self.ui_state.new_save_slot_name.clear();
+                self.push_toast(ToastKind::Success, "Save Slot Created", msg);
+                self.refresh_backups_async();
+            }
+            Err(e) => self.push_toast(ToastKind::Error, "Save Slot Failed", e),
+        }
+    }
+
+    pub fn switch_save_slot_async(&mut self, slot_name: String) {
+        let bdir = self.config.backup_dir.clone();
+        self.busy_label = Some(format!("Switching to save slot '{slot_name}'..."));
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = switch_save_slot(
+                &local_gd_data_dir(),
+                &slot_name,
+                Path::new(&bdir),
+                &crate::backup::crypto::default_vault_key_path(),
+            );
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Save Slot Switched".into(),
+                result: res,
+                refresh: RefreshKind::Backups,
+            });
+        });
+    }
+
+    pub fn resurrect_save_async(&mut self, candidate: PathBuf) {
+        let bdir = self.config.backup_dir.clone();
+        self.busy_label = Some("Resurrecting save file...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = resurrect_save(&local_gd_data_dir(), &candidate, Path::new(&bdir));
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Save Doctor".into(),
+                result: res,
+                refresh: RefreshKind::Backups,
+            });
+        });
+    }
+
+    pub fn export_bundle_async(&mut self, dest: PathBuf) {
+        let game = self.config.game_path.clone();
+        let inc_s = self.ui_state.bundle_include_saves;
+        let inc_m = self.ui_state.bundle_include_mods;
+        let inc_c = self.ui_state.bundle_include_configs;
+        self.busy_label = Some("Creating portable .geodesync bundle...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res =
+                export_geodesync_bundle(&local_gd_data_dir(), &game, &dest, inc_s, inc_m, inc_c);
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Bundle Export".into(),
+                result: res,
+                refresh: RefreshKind::None,
+            });
+        });
+    }
+
+    pub fn import_bundle_async(&mut self, src: PathBuf) {
+        let game = self.config.game_path.clone();
+        let bdir = self.config.backup_dir.clone();
+        let inc_s = self.ui_state.bundle_include_saves;
+        let inc_m = self.ui_state.bundle_include_mods;
+        self.busy_label = Some("Importing .geodesync bundle...".into());
+        spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let res = import_geodesync_bundle(
+                &src,
+                &local_gd_data_dir(),
+                &game,
+                inc_s,
+                inc_m,
+                Path::new(&bdir),
+            );
+            let _ = tx.send(WorkerEvent::GenericOpCompleted {
+                title: "Bundle Import".into(),
+                result: res,
+                refresh: RefreshKind::All,
+            });
+        });
+    }
+
+    fn sync_discord_presence(&self) {
+        let ver = self.probe.gd_version.as_deref().unwrap_or("2.2");
+        let mods_cnt = self.installed_mods.iter().filter(|m| m.enabled).count();
+        if self.active_session.is_some() {
+            let stats_tail = self
+                .save_summary
+                .as_ref()
+                .map(|s| {
+                    format!(
+                        "{}★ · {} Demons · {mods_cnt} Mods",
+                        s.player_stats.stars, s.player_stats.demons
+                    )
+                })
+                .unwrap_or_else(|| format!("GD {ver} · {mods_cnt} Active Mods"));
+            self.discord_rpc
+                .update("Playing Geometry Dash via GeoDeck", stats_tail, false);
+        } else {
+            let state = format!("GD {ver} · {mods_cnt} Mods · {} Snapshots", self.snapshots.len());
+            self.discord_rpc
+                .update("GeoDeck · Geometry Dash Companion", state, false);
+        }
     }
 
     pub fn run_integrity_check_async(&mut self) {
@@ -483,6 +894,8 @@ impl GeodeDeckApp {
             let mods = scan_installed_mods(&game_path);
             let audit = audit_mods(&mods, gd.as_deref(), geode.as_deref());
             let _ = tx.send(WorkerEvent::ModsScanned { mods, audit });
+            let kb = scan_keybind_conflicts(&game_path, &local_gd_data_dir());
+            let _ = tx.send(WorkerEvent::KeybindsScanned(kb));
         });
     }
 
@@ -631,14 +1044,23 @@ impl GeodeDeckApp {
     pub fn refresh_backups_async(&mut self) {
         let bdir = self.config.backup_dir.clone();
         spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
+            let save_dir = local_gd_data_dir();
             let snaps = list_snapshots(Path::new(&bdir));
-            let sum = inspect_save_dir(&local_gd_data_dir());
+            let sum = inspect_save_dir(&save_dir);
             merge_save_metadata_into_cache(&default_song_metadata_cache_path(), &sum);
             let legacy_backups = detect_legacy_external_backups();
             let _ = tx.send(WorkerEvent::BackupsRefreshed {
                 snapshots: snaps,
                 save_summary: Some(sum),
                 legacy_backups,
+            });
+            let bloat = analyze_save_bloat(&save_dir).ok();
+            let slots = list_save_slots(&save_dir);
+            let salvage = find_salvageable_saves(&save_dir);
+            let _ = tx.send(WorkerEvent::SaveToolsRefreshed {
+                bloat,
+                slots,
+                salvage,
             });
             let songs = scan_song_cache();
             let _ = tx.send(WorkerEvent::SongCacheScanned(songs));
@@ -679,6 +1101,10 @@ impl GeodeDeckApp {
             let _ = tx.send(WorkerEvent::CrashLogsScanned(crashes));
             let songs = scan_song_cache();
             let _ = tx.send(WorkerEvent::SongCacheScanned(songs));
+            let assets = get_assets_status(&game);
+            let _ = tx.send(WorkerEvent::AssetsStatusUpdated(assets));
+            let cache = measure_geode_caches(&game);
+            let _ = tx.send(WorkerEvent::CacheSizesMeasured(cache));
         });
     }
 
@@ -912,6 +1338,7 @@ impl GeodeDeckApp {
                 self.config.last_played = chrono::Local::now().format("%Y-%m-%d %H:%M").to_string();
                 self.config.save();
                 self.active_session = Some(session);
+                self.sync_discord_presence();
                 self.push_toast(
                     ToastKind::Success,
                     "Geometry Dash Launched",
@@ -928,10 +1355,11 @@ impl GeodeDeckApp {
         match terminate_gd_process() {
             Ok(_) => {
                 self.active_session = None;
+                self.sync_discord_presence();
                 self.push_toast(
                     ToastKind::Info,
                     "Process Terminated",
-                    "Stopped GeometryDash.exe.",
+                    "Stopped Geometry Dash.",
                 );
             }
             Err(e) => self.push_toast(ToastKind::Warning, "Stop Failed", e),
@@ -976,6 +1404,7 @@ impl GeodeDeckApp {
                     self.installed_mods = mods;
                     self.mod_audit = audit;
                     self.busy_label = None;
+                    self.sync_discord_presence();
                 }
                 WorkerEvent::IndexSearchCompleted {
                     mods,
@@ -1008,6 +1437,66 @@ impl GeodeDeckApp {
                     self.legacy_backups = legacy_backups;
                     self.busy_label = None;
                     self.initial_sync_complete = true;
+                    self.sync_discord_presence();
+                }
+                WorkerEvent::SaveToolsRefreshed {
+                    bloat,
+                    slots,
+                    salvage,
+                } => {
+                    self.save_bloat = bloat;
+                    self.save_slots = slots;
+                    self.salvage_candidates = salvage;
+                }
+                WorkerEvent::DemonlistFetched(res) => {
+                    self.demonlist_loading = false;
+                    match res {
+                        Ok(list) => {
+                            self.demonlist = list;
+                            self.demonlist_error = None;
+                        }
+                        Err(e) => {
+                            self.demonlist_error = Some(e);
+                        }
+                    }
+                }
+                WorkerEvent::HealthCheckCompleted(findings) => {
+                    self.health_checking = false;
+                    self.health_findings = findings;
+                }
+                WorkerEvent::KeybindsScanned(rep) => {
+                    self.keybind_report = rep;
+                }
+                WorkerEvent::AssetsStatusUpdated(st) => {
+                    self.assets_status = st;
+                }
+                WorkerEvent::CacheSizesMeasured(sz) => {
+                    self.cache_sizes = sz;
+                }
+                WorkerEvent::InstallsScanned(found) => {
+                    self.discovered_installs = found;
+                }
+                WorkerEvent::GenericOpCompleted {
+                    title,
+                    result,
+                    refresh,
+                } => {
+                    self.busy_label = None;
+                    match result {
+                        Ok(msg) => self.push_toast(ToastKind::Success, title, msg),
+                        Err(e) => self.push_toast(ToastKind::Error, title, e),
+                    }
+                    match refresh {
+                        RefreshKind::None => {}
+                        RefreshKind::Backups => self.refresh_backups_async(),
+                        RefreshKind::Mods => self.refresh_mods_async(),
+                        RefreshKind::Tools => {
+                            self.refresh_tools_async();
+                            self.run_health_check_async();
+                        }
+                        RefreshKind::Probe => self.refresh_probe_async(),
+                        RefreshKind::All => self.refresh_all_async(),
+                    }
                 }
                 WorkerEvent::MaxPerfApplied(res) => {
                     self.max_perf_applied = true;
@@ -1177,6 +1666,7 @@ impl GeodeDeckApp {
                     self.active_session = None;
                     self.config.playtime_secs += duration_secs;
                     self.config.save();
+                    self.sync_discord_presence();
                     logging::info(
                         "Session",
                         format!(
@@ -1216,8 +1706,54 @@ impl GeodeDeckApp {
 }
 
 impl eframe::App for GeodeDeckApp {
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.discord_rpc.shutdown();
+    }
+
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         self.process_worker_events();
+
+        // === Universal Keyboard Shortcuts (Ctrl+1..7, Ctrl+F, Ctrl+H, F5) ===
+        let (nav_shortcut, do_focus_search, do_health, do_refresh) = ctx.input(|i| {
+            let ctrl = i.modifiers.ctrl || i.modifiers.command;
+            let nav = if ctrl && i.key_pressed(egui::Key::Num1) {
+                Some(NavTab::Home)
+            } else if ctrl && i.key_pressed(egui::Key::Num2) {
+                Some(NavTab::Library)
+            } else if ctrl && i.key_pressed(egui::Key::Num3) {
+                Some(NavTab::Mods)
+            } else if ctrl && i.key_pressed(egui::Key::Num4) {
+                Some(NavTab::Demonlist)
+            } else if ctrl && i.key_pressed(egui::Key::Num5) {
+                Some(NavTab::Backups)
+            } else if ctrl && i.key_pressed(egui::Key::Num6) {
+                Some(NavTab::Tools)
+            } else if ctrl && i.key_pressed(egui::Key::Num7) {
+                Some(NavTab::Settings)
+            } else {
+                None
+            };
+            (
+                nav,
+                ctrl && i.key_pressed(egui::Key::F),
+                ctrl && i.key_pressed(egui::Key::H),
+                i.key_pressed(egui::Key::F5),
+            )
+        });
+        if let Some(target) = nav_shortcut {
+            self.navigate_to(target);
+        }
+        if do_focus_search {
+            self.ui_state.focus_search_requested = true;
+        }
+        if do_health {
+            self.ui_state.tools_subtab = 0;
+            self.navigate_to(NavTab::Tools);
+            self.run_health_check_async();
+        }
+        if do_refresh {
+            self.refresh_all_async();
+        }
 
         // Check for screenshot capture mode completion
         if let Some(ref out_path) = self.capture_output.clone() {
@@ -1414,8 +1950,8 @@ impl eframe::App for GeodeDeckApp {
                     .inner_margin(Margin {
                         left: 14.0,
                         right: 14.0,
-                        top: 14.0,
-                        bottom: 16.0,
+                        top: 10.0,
+                        bottom: 12.0,
                     }),
             )
             .show(ctx, |ui| {
@@ -1424,7 +1960,7 @@ impl eframe::App for GeodeDeckApp {
                         let resp = ui
                             .add(
                                 egui::Image::new(lockup)
-                                    .fit_to_exact_size(Vec2::new(172.0, 60.0))
+                                    .fit_to_exact_size(Vec2::new(152.0, 53.0))
                                     .sense(egui::Sense::click()),
                             )
                             .on_hover_text("GeoDeck Home");
@@ -1435,14 +1971,15 @@ impl eframe::App for GeodeDeckApp {
                         ui.label(bold_text("GeoDeck", 20.0, TEXT_PRIMARY));
                     }
                 });
-                ui.add_space(12.0);
+                ui.add_space(8.0);
                 ui.separator();
-                ui.add_space(12.0);
+                ui.add_space(8.0);
 
                 let nav_items = [
                     (NavTab::Home, ph::HOUSE, "Home", 0usize),
                     (NavTab::Library, ph::SQUARES_FOUR, "Installs", 0usize),
                     (NavTab::Mods, ph::PUZZLE_PIECE, "Mods", self.mod_updates.len()),
+                    (NavTab::Demonlist, ph::STAR, "Demonlist", 0usize),
                     (NavTab::Backups, ph::SHIELD_CHECK, "Backups", 0usize),
                     (NavTab::Tools, ph::WRENCH, "Tools", self.crash_reports.len()),
                 ];
@@ -1470,13 +2007,13 @@ impl eframe::App for GeodeDeckApp {
                             Stroke::NONE
                         })
                         .rounding(Rounding::same(RADIUS_BUTTON))
-                        .inner_margin(Margin::symmetric(12.0, 9.0))
+                        .inner_margin(Margin::symmetric(12.0, 7.0))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(icon).size(16.0).color(icon_col));
+                                ui.label(RichText::new(icon).size(15.5).color(icon_col));
                                 ui.add_space(6.0);
-                                ui.label(semibold_text(label, 13.5, fg));
+                                ui.label(semibold_text(label, 13.0, fg));
                                 if count_badge > 0 {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
@@ -1497,8 +2034,8 @@ impl eframe::App for GeodeDeckApp {
 
                     if selected {
                         let bar = egui::Rect::from_min_size(
-                            egui::pos2(resp.rect.left() + 2.0, resp.rect.top() + 7.0),
-                            Vec2::new(3.0, resp.rect.height() - 14.0),
+                            egui::pos2(resp.rect.left() + 2.0, resp.rect.top() + 6.0),
+                            Vec2::new(3.0, resp.rect.height() - 12.0),
                         );
                         ui.painter()
                             .rect_filled(bar, Rounding::same(99.0), ACCENT_EPIC);
@@ -1512,7 +2049,7 @@ impl eframe::App for GeodeDeckApp {
                     if resp.clicked() {
                         pending_nav = Some(tab);
                     }
-                    ui.add_space(3.0);
+                    ui.add_space(2.0);
                 }
                 if let Some(t) = pending_nav {
                     self.navigate_to(t);
@@ -1527,7 +2064,7 @@ impl eframe::App for GeodeDeckApp {
                                 .color(TEXT_MUTED),
                         );
                     });
-                    ui.add_space(6.0);
+                    ui.add_space(4.0);
 
                     let set_sel = self.active_tab == NavTab::Settings;
                     let set_fg = if set_sel { Color32::WHITE } else { TEXT_SECONDARY };
@@ -1543,11 +2080,11 @@ impl eframe::App for GeodeDeckApp {
                             Stroke::NONE
                         })
                         .rounding(Rounding::same(RADIUS_BUTTON))
-                        .inner_margin(Margin::symmetric(12.0, 9.0))
+                        .inner_margin(Margin::symmetric(12.0, 7.0))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(ph::GEAR_SIX).size(16.0).color(if set_sel {
+                                ui.label(RichText::new(ph::GEAR_SIX).size(15.5).color(if set_sel {
                                     ACCENT_EPIC_BRIGHT
                                 } else {
                                     set_fg
@@ -1569,30 +2106,32 @@ impl eframe::App for GeodeDeckApp {
                         self.navigate_to(NavTab::Settings);
                     }
 
-                    ui.add_space(6.0);
-                    inset_frame().show(ui, |ui| {
-                        ui.set_min_width(ui.available_width());
-                        ui.horizontal(|ui| {
+                    if ui.available_height() >= 82.0 {
+                        ui.add_space(4.0);
+                        inset_frame().show(ui, |ui| {
+                            ui.set_min_width(ui.available_width());
+                            ui.horizontal(|ui| {
+                                ui.label(
+                                    RichText::new(ph::LIGHTNING)
+                                        .size(13.0)
+                                        .color(ACCENT_EPIC_BRIGHT),
+                                );
+                                ui.label(semibold_text("Max Performance", 11.5, TEXT_PRIMARY));
+                            });
                             ui.label(
-                                RichText::new(ph::LIGHTNING)
-                                    .size(13.5)
-                                    .color(ACCENT_EPIC_BRIGHT),
+                                RichText::new("Auto-applied on launch")
+                                    .size(10.5)
+                                    .color(TEXT_MUTED),
                             );
-                            ui.label(semibold_text("Max Performance", 11.5, TEXT_PRIMARY));
                         });
-                        ui.label(
-                            RichText::new("Auto-applied on launch")
-                                .size(10.5)
-                                .color(TEXT_MUTED),
-                        );
-                    });
+                    }
 
                     if let Some(busy) = self
                         .busy_label
                         .clone()
                         .or_else(|| self.song_metadata_resolving.then(|| "Resolving song metadata...".into()))
                     {
-                        ui.add_space(8.0);
+                        ui.add_space(6.0);
                         inset_frame().show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
@@ -1647,6 +2186,7 @@ impl eframe::App for GeodeDeckApp {
                             NavTab::Home => "Home",
                             NavTab::Library => "Installs",
                             NavTab::Mods => "Mods",
+                            NavTab::Demonlist => "Demonlist & Progress",
                             NavTab::Backups => "Backups",
                             NavTab::Tools => "Tools",
                             NavTab::Settings => "Settings",
@@ -1766,9 +2306,7 @@ impl eframe::App for GeodeDeckApp {
                                                     ))
                                                     .clicked()
                                                 {
-                                                    let _ = std::process::Command::new("cmd")
-                                                        .args(["/c", "start", "", &info.release_url])
-                                                        .spawn();
+                                                    open_url(&info.release_url);
                                                 }
                                             },
                                         );
@@ -1783,6 +2321,7 @@ impl eframe::App for GeodeDeckApp {
                     NavTab::Home => views::home::render(self, ui),
                     NavTab::Library => views::library::render(self, ui),
                     NavTab::Mods => views::mods::render(self, ui),
+                    NavTab::Demonlist => views::demonlist::render(self, ui),
                     NavTab::Backups => views::backups::render(self, ui),
                     NavTab::Tools => views::tools::render(self, ui),
                     NavTab::Settings => views::settings::render(self, ui),

@@ -3,6 +3,7 @@ use serde_json::Value;
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
+#[cfg(windows)]
 use std::process::Command;
 
 use crate::core::config::{config_dir, AppliedTweaksState, OptimizationPreset};
@@ -87,6 +88,7 @@ pub fn ensure_rollback_captured(exe_path: &str) -> OptimizationRollback {
     rb
 }
 
+#[cfg(windows)]
 fn query_reg_value(key: &str, value_name: &str) -> Option<String> {
     let out = Command::new("reg")
         .args(["query", key, "/v", value_name])
@@ -106,6 +108,12 @@ fn query_reg_value(key: &str, value_name: &str) -> Option<String> {
     None
 }
 
+#[cfg(not(windows))]
+fn query_reg_value(_key: &str, _value_name: &str) -> Option<String> {
+    None
+}
+
+#[cfg(windows)]
 fn set_reg_sz(key: &str, value_name: &str, data: &str) -> Result<(), String> {
     let out = Command::new("reg")
         .args(["add", key, "/v", value_name, "/t", "REG_SZ", "/d", data, "/f"])
@@ -118,6 +126,12 @@ fn set_reg_sz(key: &str, value_name: &str, data: &str) -> Result<(), String> {
     }
 }
 
+#[cfg(not(windows))]
+fn set_reg_sz(_key: &str, _value_name: &str, _data: &str) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(windows)]
 fn delete_reg_value(key: &str, value_name: &str) -> Result<(), String> {
     let out = Command::new("reg")
         .args(["delete", key, "/v", value_name, "/f"])
@@ -134,6 +148,11 @@ fn delete_reg_value(key: &str, value_name: &str) -> Result<(), String> {
             Err(stderr.trim().to_string())
         }
     }
+}
+
+#[cfg(not(windows))]
+fn delete_reg_value(_key: &str, _value_name: &str) -> Result<(), String> {
+    Ok(())
 }
 
 pub fn read_gpu_high_perf(exe_path: &str) -> bool {

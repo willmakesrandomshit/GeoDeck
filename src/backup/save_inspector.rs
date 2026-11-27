@@ -1,10 +1,12 @@
 use base64::engine::general_purpose::URL_SAFE;
 use base64::Engine;
-use flate2::read::GzDecoder;
+use flate2::read::{GzDecoder, ZlibDecoder};
+use flate2::write::GzEncoder;
+use flate2::Compression;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::Path;
 
 const GD_XOR_KEY: u8 = 11;
@@ -14,6 +16,30 @@ pub struct GmSongEntry {
     pub song_id: String,
     pub title: String,
     pub artist: String,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct PlayerStats {
+    pub stars: u64,
+    pub demons: u64,
+    pub moons: u64,
+    pub diamonds: u64,
+    pub secret_coins: u64,
+    pub user_coins: u64,
+    pub orbs: u64,
+    pub attempts: u64,
+    pub jumps: u64,
+}
+
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct LevelProgressEntry {
+    pub name: String,
+    pub author: String,
+    pub percent: u32,
+    pub practice: u32,
+    pub attempts: u32,
+    pub is_demon: bool,
+    pub stars: u32,
 }
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -40,14 +66,21 @@ pub struct SaveSummary {
     pub known_songs: Vec<GmSongEntry>,
     #[serde(default)]
     pub song_to_levels: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub player_stats: PlayerStats,
+    #[serde(default)]
+    pub active_grinds: Vec<LevelProgressEntry>,
+    #[serde(default)]
+    pub completed_demons: Vec<LevelProgressEntry>,
+    #[serde(default)]
+    pub level_progress_by_name: BTreeMap<String, (u32, u32)>,
 }
 
-/// Decodes a Geometry Dash Windows `.dat` file (`XOR 0x0B` -> `URL-safe Base64` -> `Gzip`) into XML in memory.
+/// Decodes a Geometry Dash `.dat` file (`XOR 0x0B` -> `URL-safe Base64` -> `Gzip` or `Zlib`) into XML in memory.
 pub fn decode_gd_dat_to_xml(raw: &[u8]) -> Result<String, String> {
     if raw.is_empty() {
         return Err("Save file is 0 bytes".into());
     }
-    // Check if unencoded plaintext XML already
     if raw.starts_with(b"<?xml") || raw.starts_with(b"<plist") {
         let s = String::from_utf8(raw.to_vec()).map_err(|e| format!("UTF-8 error: {e}"))?;
         validate_gd_plist_xml(&s)?;
@@ -70,15 +103,37 @@ pub fn decode_gd_dat_to_xml(raw: &[u8]) -> Result<String, String> {
         .decode(&b64_bytes)
         .map_err(|e| format!("Base64 decode failed: {e}"))?;
 
-    let mut decoder = GzDecoder::new(&compressed[..]);
     let mut xml_bytes = Vec::new();
-    decoder
-        .read_to_end(&mut xml_bytes)
-        .map_err(|e| format!("Gzip inflate failed: {e}"))?;
+    let inflate_res = if compressed.starts_with(&[0x1f, 0x8b]) {
+        let mut decoder = GzDecoder::new(&compressed[..]);
+        decoder.read_to_end(&mut xml_bytes)
+    } else {
+        let mut zdec = ZlibDecoder::new(&compressed[..]);
+        match zdec.read_to_end(&mut xml_bytes) {
+            Ok(n) => Ok(n),
+            Err(_) => {
+                xml_bytes.clear();
+                let mut gdec = GzDecoder::new(&compressed[..]);
+                gdec.read_to_end(&mut xml_bytes)
+            }
+        }
+    };
+    inflate_res.map_err(|e| format!("Inflate failed: {e}"))?;
     let xml = String::from_utf8_lossy(&xml_bytes).into_owned();
 
     validate_gd_plist_xml(&xml)?;
     Ok(xml)
+}
+
+/// Encodes XML back into Geometry Dash's `.dat` wire format (`Gzip` -> `URL-safe Base64` -> `XOR 0x0B`).
+pub fn encode_gd_dat_from_xml(xml: &str) -> Result<Vec<u8>, String> {
+    validate_gd_plist_xml(xml)?;
+    let mut gz = GzEncoder::new(Vec::new(), Compression::default());
+    gz.write_all(xml.as_bytes())
+        .map_err(|e| format!("Gzip compress failed: {e}"))?;
+    let compressed = gz.finish().map_err(|e| format!("Gzip finish failed: {e}"))?;
+    let b64 = URL_SAFE.encode(compressed);
+    Ok(b64.bytes().map(|b| b ^ GD_XOR_KEY).collect())
 }
 
 pub fn validate_gd_plist_xml(xml: &str) -> Result<(), String> {
@@ -97,9 +152,44 @@ pub fn validate_dat_file(path: &Path) -> Result<(), String> {
 /// Extracts strictly non-sensitive summary fields from CCGameManager XML.
 /// NEVER reads or returns GJA_002 (password/GJP), GJA_005 (GJP2), or token keys.
 fn extract_safe_player_meta(xml: &str) -> (String, String) {
-    let name = extract_plist_string_value(xml, "GJA_001").unwrap_or_else(|| "Player".into());
+    let name = extract_plist_string_value(xml, "GJA_001")
+        .or_else(|| extract_plist_string_value(xml, "playerName"))
+        .unwrap_or_else(|| "Player".into());
     let acct = extract_plist_string_value(xml, "GJA_003").unwrap_or_default();
     (name, acct)
+}
+
+/// Extracts `GS_value` progression counters (stars, demons, moons, diamonds, coins, orbs, attempts, jumps).
+pub fn parse_gs_value_stats(xml: &str) -> PlayerStats {
+    let mut stats = PlayerStats::default();
+    let Some(gs_pos) = xml.find("<k>GS_value</k>") else {
+        return stats;
+    };
+    let rest = &xml[gs_pos + "<k>GS_value</k>".len()..];
+    let Some(dict_rel) = rest.find("<d>") else {
+        return stats;
+    };
+    let dict_start = gs_pos + "<k>GS_value</k>".len() + dict_rel;
+    let Some(dict_end) = find_matching_dict_end(xml, dict_start) else {
+        return stats;
+    };
+    let section = &xml[dict_start..dict_end];
+
+    let read_stat = |k: &str| -> u64 {
+        extract_plist_string_value(section, k)
+            .and_then(|s| s.trim().parse::<u64>().ok())
+            .unwrap_or(0)
+    };
+    stats.jumps = read_stat("1");
+    stats.attempts = read_stat("2");
+    stats.demons = read_stat("5");
+    stats.stars = read_stat("6");
+    stats.secret_coins = read_stat("8");
+    stats.user_coins = read_stat("12");
+    stats.diamonds = read_stat("13");
+    stats.orbs = read_stat("14");
+    stats.moons = read_stat("28");
+    stats
 }
 
 fn xml_unescape(s: &str) -> String {
@@ -186,19 +276,39 @@ pub fn parse_mdlm_songs_from_xml(xml: &str) -> Vec<GmSongEntry> {
     out
 }
 
-/// Efficiently extracts `song_id -> Vec<level_name>` from `GLM_03` (saved online levels)
-/// in `CCGameManager.dat`, skipping massive `<k>k4</k><s>...</s>` level object strings.
-pub fn parse_glm_level_songs_from_xml(xml: &str) -> BTreeMap<String, Vec<String>> {
-    let mut map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+struct GlmParsedData {
+    song_to_levels: BTreeMap<String, Vec<String>>,
+    active_grinds: Vec<LevelProgressEntry>,
+    completed_demons: Vec<LevelProgressEntry>,
+    level_progress_by_name: BTreeMap<String, (u32, u32)>,
+}
+
+fn has_plist_true_tag(block: &str, key: &str) -> bool {
+    let pat = format!("<k>{key}</k>");
+    let Some(pos) = block.find(&pat) else {
+        return false;
+    };
+    let trimmed = block[pos + pat.len()..].trim_start();
+    trimmed.starts_with("<t/>") || trimmed.starts_with("<t />")
+}
+
+/// Efficiently extracts `song_id -> Vec<level_name>`, completed demons, active grinds,
+/// and level progress map from `GLM_03` in `CCGameManager.dat`, skipping massive `<k>k4</k><s>...</s>` level object strings.
+fn parse_glm_data_from_xml(xml: &str) -> GlmParsedData {
+    let mut out = GlmParsedData {
+        song_to_levels: BTreeMap::new(),
+        active_grinds: Vec::new(),
+        completed_demons: Vec::new(),
+        level_progress_by_name: BTreeMap::new(),
+    };
     let Some(glm_pos) = xml.find("<k>GLM_03</k>") else {
-        return map;
+        return out;
     };
     let after_key = &xml[glm_pos + "<k>GLM_03</k>".len()..];
     let Some(dict_rel) = after_key.find("<d>") else {
-        return map;
+        return out;
     };
     let glm_start = glm_pos + "<k>GLM_03</k>".len() + dict_rel;
-    // Scan each `<d><k>kCEK</k>` level block inside GLM_03 without scanning inside k4 level strings
     let mut cursor = glm_start + 3;
     let bytes = xml.as_bytes();
     while cursor < bytes.len() {
@@ -219,16 +329,56 @@ pub fn parse_glm_level_songs_from_xml(xml: &str) -> BTreeMap<String, Vec<String>
         if trimmed.starts_with("<d>") {
             if let Some(entry_end) = find_matching_dict_end_skip_k4(xml, entry_start) {
                 let block = &xml[entry_start..entry_end];
-                if let Some(song_id) = extract_plist_string_value_fast_skip_k4(block, "k45") {
-                    let sid = song_id.trim().to_string();
-                    if !sid.is_empty() && sid != "0" {
-                        if let Some(name) = extract_plist_string_value_fast_skip_k4(block, "k2") {
-                            let clean_name = name.trim().to_string();
-                            if !clean_name.is_empty() {
-                                let list = map.entry(sid).or_default();
-                                if !list.contains(&clean_name) && list.len() < 8 {
-                                    list.push(clean_name);
-                                }
+                let clean_name = extract_plist_string_value_fast_skip_k4(block, "k2")
+                    .map(|s| s.trim().to_string())
+                    .unwrap_or_default();
+
+                if !clean_name.is_empty() {
+                    if let Some(song_id) = extract_plist_string_value_fast_skip_k4(block, "k45") {
+                        let sid = song_id.trim().to_string();
+                        if !sid.is_empty() && sid != "0" {
+                            let list = out.song_to_levels.entry(sid).or_default();
+                            if !list.contains(&clean_name) && list.len() < 8 {
+                                list.push(clean_name.clone());
+                            }
+                        }
+                    }
+
+                    if let Some(pct_s) = extract_plist_string_value_fast_skip_k4(block, "k19") {
+                        if let Ok(percent) = pct_s.trim().parse::<u32>() {
+                            let author = extract_plist_string_value_fast_skip_k4(block, "k5")
+                                .map(|s| s.trim().to_string())
+                                .filter(|s| !s.is_empty())
+                                .unwrap_or_else(|| "Unknown".into());
+                            let practice = extract_plist_string_value_fast_skip_k4(block, "k21")
+                                .and_then(|s| s.trim().parse::<u32>().ok())
+                                .unwrap_or(0);
+                            let attempts = extract_plist_string_value_fast_skip_k4(block, "k18")
+                                .and_then(|s| s.trim().parse::<u32>().ok())
+                                .unwrap_or(0);
+                            let is_demon = has_plist_true_tag(block, "k25");
+                            let stars = extract_plist_string_value_fast_skip_k4(block, "k26")
+                                .and_then(|s| s.trim().parse::<u32>().ok())
+                                .unwrap_or(if is_demon { 10 } else { 0 });
+
+                            let key = clean_name.to_lowercase();
+                            let prev = out.level_progress_by_name.entry(key).or_insert((0, 0));
+                            prev.0 = prev.0.max(percent);
+                            prev.1 = prev.1.max(attempts);
+
+                            let entry = LevelProgressEntry {
+                                name: clean_name,
+                                author,
+                                percent,
+                                practice,
+                                attempts,
+                                is_demon,
+                                stars,
+                            };
+                            if percent >= 100 && (is_demon || stars >= 10) {
+                                out.completed_demons.push(entry);
+                            } else if (15..100).contains(&percent) {
+                                out.active_grinds.push(entry);
                             }
                         }
                     }
@@ -239,7 +389,18 @@ pub fn parse_glm_level_songs_from_xml(xml: &str) -> BTreeMap<String, Vec<String>
         }
         cursor = after_k;
     }
-    map
+
+    out.active_grinds
+        .sort_by(|a, b| b.percent.cmp(&a.percent).then(b.practice.cmp(&a.practice)));
+    out.active_grinds.truncate(30);
+    out.completed_demons
+        .sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+    out.completed_demons.truncate(100);
+    out
+}
+
+pub fn parse_glm_level_songs_from_xml(xml: &str) -> BTreeMap<String, Vec<String>> {
+    parse_glm_data_from_xml(xml).song_to_levels
 }
 
 fn find_matching_dict_end_skip_k4(xml: &str, start_of_open_d: usize) -> Option<usize> {
@@ -358,7 +519,7 @@ pub fn parse_local_levels_from_xml(xml: &str) -> Vec<LocalLevelInfo> {
     levels
 }
 
-fn find_matching_dict_end(xml: &str, start_of_open_d: usize) -> Option<usize> {
+pub(crate) fn find_matching_dict_end(xml: &str, start_of_open_d: usize) -> Option<usize> {
     let bytes = xml.as_bytes();
     let mut i = start_of_open_d;
     let mut depth = 0i32;
@@ -428,7 +589,12 @@ pub fn inspect_save_dir(save_dir: &Path) -> SaveSummary {
                 summary.player_name = name;
                 summary.account_id = acct;
                 summary.known_songs = parse_mdlm_songs_from_xml(&xml);
-                summary.song_to_levels = parse_glm_level_songs_from_xml(&xml);
+                summary.player_stats = parse_gs_value_stats(&xml);
+                let glm = parse_glm_data_from_xml(&xml);
+                summary.song_to_levels = glm.song_to_levels;
+                summary.active_grinds = glm.active_grinds;
+                summary.completed_demons = glm.completed_demons;
+                summary.level_progress_by_name = glm.level_progress_by_name;
             }
             Err(e) => {
                 summary.validation_error = Some(format!("CCGameManager.dat: {e}"));
