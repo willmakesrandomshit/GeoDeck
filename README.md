@@ -32,3 +32,9 @@ cargo test
 cargo run -- --self-check
 cargo build --release
 ```
+
+## Launch trailer
+
+The Alpha 1.0.0 launch trailer is built with Remotion in [`video/`](video/). It is kept separate from the
+application source. See [`video/README.md`](video/README.md) for the render pipeline and
+[`video/ASSETS.md`](video/ASSETS.md) for asset and licence notes.

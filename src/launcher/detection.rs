@@ -125,7 +125,7 @@ pub fn parse_pe_timestamp_bytes(data: &[u8]) -> Result<u32, String> {
         return Err("Missing MZ DOS header".into());
     }
     let e_lfanew = u32::from_le_bytes(data[0x3C..0x40].try_into().unwrap()) as usize;
-    if e_lfanew + 24 > data.len() {
+    if e_lfanew.checked_add(24).is_none_or(|end| end > data.len()) {
         return Err("PE header offset out of bounds".into());
     }
     if &data[e_lfanew..e_lfanew + 4] != b"PE\0\0" {

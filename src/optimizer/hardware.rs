@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+#[cfg(windows)]
 use std::process::Command;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]

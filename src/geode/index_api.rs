@@ -9,6 +9,7 @@ use std::time::Duration;
 use zip::ZipArchive;
 
 use crate::core::worker::ModUpdateAvailable;
+use crate::geode::package::is_safe_mod_id;
 use crate::geode::package::InstalledMod;
 
 const GEODE_API_BASE: &str = "https://api.geode-sdk.org/v1";
@@ -376,28 +377,40 @@ pub fn check_updates_for_installed(
     updates
 }
 
+/// Largest file GeoDeck will download into memory (mods and the Geode loader are far smaller).
+const MAX_DOWNLOAD_BYTES: u64 = 512 * 1024 * 1024;
+
+/// Downloads `url` and verifies it against `expected_sha256`. Fails closed: a missing
+/// checksum is an error, never a silent skip, so nothing unverified is ever installed.
 pub fn download_verified_bytes(url: &str, expected_sha256: &str) -> Result<Vec<u8>, String> {
+    let expected = expected_sha256.trim();
+    if expected.is_empty() {
+        return Err(format!(
+            "No SHA-256 checksum is published for {url}; refusing to install an unverified file."
+        ));
+    }
     let agent = http_agent();
     let resp = agent
         .get(url)
         .call()
         .map_err(|e| format!("Download failed ({url}): {e}"))?;
-    let mut reader = resp.into_reader();
+    let mut reader = resp.into_reader().take(MAX_DOWNLOAD_BYTES + 1);
     let mut bytes = Vec::new();
     reader
         .read_to_end(&mut bytes)
         .map_err(|e| format!("Read stream failed: {e}"))?;
+    if bytes.len() as u64 > MAX_DOWNLOAD_BYTES {
+        return Err(format!("Download from {url} exceeds the {} MB limit.", MAX_DOWNLOAD_BYTES / 1024 / 1024));
+    }
 
-    if !expected_sha256.trim().is_empty() {
-        let mut hasher = Sha256::new();
-        hasher.update(&bytes);
-        let actual = format!("{:x}", hasher.finalize());
-        if !actual.eq_ignore_ascii_case(expected_sha256.trim()) {
-            return Err(format!(
-                "SHA-256 verification failed! Expected {}, got {}",
-                expected_sha256, actual
-            ));
-        }
+    let mut hasher = Sha256::new();
+    hasher.update(&bytes);
+    let actual = format!("{:x}", hasher.finalize());
+    if !actual.eq_ignore_ascii_case(expected) {
+        return Err(format!(
+            "SHA-256 verification failed! Expected {}, got {}",
+            expected, actual
+        ));
     }
 
     Ok(bytes)
@@ -427,6 +440,9 @@ pub fn install_mod_version(
     mod_id: &str,
     version: &IndexModVersion,
 ) -> Result<String, String> {
+    if !is_safe_mod_id(mod_id) {
+        return Err(format!("Refusing to install mod with unsafe id '{mod_id}'."));
+    }
     let bytes = download_verified_bytes(&version.download_link, &version.hash)?;
     let geode_dir = crate::core::platform::gd_geode_dir(Path::new(game_dir));
     let mods_dir = geode_dir.join("mods");

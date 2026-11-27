@@ -15,8 +15,9 @@ on:
       - "Beta-*"
       - "RC-*"
 
+# Least privilege by default; only the publish job may write releases.
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -29,11 +30,20 @@ jobs:
       tag: ${{ steps.tag.outputs.tag }}
     steps:
       - id: tag
+        # Values are passed through env (never interpolated into the script) and the tag
+        # is validated, because later jobs interpolate it into shell and PowerShell.
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_TAG: ${{ github.event.inputs.release_tag }}
         run: |
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            TAG="${{ github.event.inputs.release_tag }}"
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TAG="$INPUT_TAG"
           else
             TAG="${GITHUB_REF_NAME}"
+          fi
+          if ! [[ "$TAG" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+            echo "Refusing release tag with unexpected characters." >&2
+            exit 1
           fi
           echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
 
@@ -78,6 +88,8 @@ jobs:
     name: Publish Windows Release
     needs: [resolve-tag, build-windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4

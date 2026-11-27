@@ -87,7 +87,7 @@ fn validate_pe_magic(path: &Path) -> Result<(), String> {
         return Err("Invalid MZ executable signature".into());
     }
     let e_lfanew = u32::from_le_bytes(buf[0x3C..0x40].try_into().unwrap()) as usize;
-    if e_lfanew + 4 > n || &buf[e_lfanew..e_lfanew + 4] != b"PE\0\0" {
+    if e_lfanew.checked_add(4).is_none_or(|end| end > n) || &buf[e_lfanew..e_lfanew + 4] != b"PE\0\0" {
         return Err("Corrupt PE header".into());
     }
     Ok(())

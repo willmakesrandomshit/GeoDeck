@@ -7,7 +7,7 @@ use zip::write::SimpleFileOptions;
 use zip::{CompressionMethod, ZipArchive, ZipWriter};
 
 use crate::geode::package::{
-    local_gd_data_dir, mod_settings_path, scan_installed_mods_with_data_dir,
+    is_safe_mod_id, local_gd_data_dir, mod_settings_path, scan_installed_mods_with_data_dir,
     set_mod_enabled_by_id,
 };
 
@@ -198,6 +198,14 @@ pub fn import_gdpack_with_data_dir(
             .map_err(|e| format!("read manifest: {e}"))?;
         serde_json::from_str(&s).map_err(|e| format!("parse manifest: {e}"))?
     };
+
+    // The manifest is untrusted: reject path-like IDs before anything is written.
+    if let Some(bad) = manifest.mods.iter().find(|m| !is_safe_mod_id(&m.id)) {
+        return Err(format!(
+            "Pack contains an unsafe mod id '{}'; refusing to import.",
+            bad.id
+        ));
+    }
 
     let mods_dir = Path::new(game_dir).join("geode").join("mods");
     fs::create_dir_all(&mods_dir).map_err(|e| format!("create mods dir: {e}"))?;
