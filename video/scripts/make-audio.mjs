@@ -291,5 +291,6 @@ function writeWav(file, [L, R]) {
 }
 
 writeWav(path.join(outDir, "trailer-score.wav"), mixOut({ music, sfx }, true));
+writeWav(path.join(outDir, "trailer-sfx.wav"), mixOut({ music: [new Float32Array(N), new Float32Array(N)], sfx }, true));
 writeWav(path.join(outDir, "trailer-music.wav"), mixOut({ music, sfx: [new Float32Array(N), new Float32Array(N)] }, false));
 console.log("wrote", path.join(outDir, "trailer-score.wav"));

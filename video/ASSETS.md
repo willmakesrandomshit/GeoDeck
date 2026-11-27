@@ -3,16 +3,29 @@
 ## Application footage and screenshots (`public/shots/`)
 
 - Captured from the GeoDeck application in this repository, built with
-  `cargo build` (debug profile, Linux) and run under a virtual X display
-  (Xvfb) using the app's own `--capture` / `--tab` / `--size 1600x1000` flags.
-- The capture ran in a clean sandbox: no Geometry Dash installation, no Geode
-  mods, no vault snapshots, no NONG song cache, and no internet access. The
-  footage therefore shows real empty and "not detected" states. Nothing in the
-  footage was populated with invented data.
-- One edit was made to every screenshot: the bottom-right "Geode Index Error"
-  toast (caused by the sandbox having no internet access) was painted over
-  with the app's background colour (`ffmpeg drawbox`). The untouched originals
-  are in `public/shots/raw/`.
+  `cargo build --release` (Linux) and run under a virtual X display (Xvfb). Main
+  tabs use the app's own `--capture` / `--tab` / `--size 1600x1000` flags; sub-tabs
+  (Crash Logs, Levels, Profiles & .gdpack, Audit & Keybinds, Save Slots,
+  Compactor) were opened by clicking them with xdotool and grabbing the display.
+  Reproduce with `bash scripts/capture-shots.sh`.
+- No pixel edits were made to any screenshot.
+- **The footage uses a DEMO environment, not a real player's machine.**
+  `scripts/make-demo-fixture.py` lays out, in the app's normal Linux locations
+  (`/home/deck/...`), a Steam-style Geometry Dash folder with a PE-stamped
+  `GeometryDash.exe` (detected by the app as GD 2.2081), a Geode loader stand-in
+  (detected as Geode 5.11.2), five `.geode` packages, five generated audio
+  files, a demo crash log, and GD-format save files for a player named
+  "DemoPlayer". These use the same formats as `tests/integration_tests.rs`.
+  Every mod, song, level and crash is labelled "Demo". None are real binaries,
+  mods, songs or saves, and the numbers on screen (stars, demons, etc.) are
+  invented for the demo and are not performance or product claims.
+- The three vault snapshots were created by clicking the app's own
+  "Create Backup Now" button, so they are real AES-256-GCM snapshots of the demo save.
+- The sandbox has no internet. To keep the offline "index unreachable" toast out
+  of frame, the Geode, Pointercrate and GitHub hosts were pointed at a local
+  listener that never answers during capture, so those requests hang rather than
+  fail. As a result, Browse Geode, Demonlist data and update checks are not shown
+  working in the footage.
 - Footage is GeoDeck's own work, under the same licence as the repository.
 
 ## Branding and fonts
@@ -25,6 +38,27 @@
   outside this project.
 - Geometry Dash, Geode and Steam are trademarks of their owners. They appear in
   the footage only because the application detects and manages them.
+
+## Music (Kevin MacLeod, CC BY 4.0)
+
+- Track: "Rynos Theme" by Kevin MacLeod, downloaded from incompetech.com
+  (`public/music/Rynos Theme.mp3`, 185 s original, first 60 s used as the bed).
+- Licence: Creative Commons Attribution 4.0 (https://creativecommons.org/licenses/by/4.0/).
+  The credit "Music: 'Rynos Theme' by Kevin MacLeod (incompetech.com), CC BY 4.0"
+  appears on the finale card and must stay in the video description.
+- Used unmodified apart from trimming, fades, and level/loudness processing.
+
+## Voice-over (ElevenLabs, premade voice "George")
+
+- Generated with the ElevenLabs API (model `eleven_multilingual_v2`, voice
+  `JBFqnCBsd6RMkjVDRZzb`, "George - Warm, Captivating Storyteller", a premade voice).
+  Script: `scripts/make-narration-elevenlabs.py`, cue text in `scripts/cues.txt`.
+- Only the trailer's own lines were sent to the API. No recorded human speech is used.
+- LICENCE CHECK: ElevenLabs' terms govern commercial use of generated audio,
+  and that depends on your subscription plan. Confirm the plan allows commercial
+  publication before posting the trailer publicly.
+- The earlier Piper voice (`scripts/make-narration.sh`, `public/vo-model/`) is
+  superseded. Its Blizzard-dataset licence was unverified for commercial use.
 
 ## Music and sound effects (`public/audio/`)
 

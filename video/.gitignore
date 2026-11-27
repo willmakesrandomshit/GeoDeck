@@ -3,3 +3,11 @@ out/
 .remotion/
 !public/**/*.png
 !public/**/*.jpg
+# Large or regenerable intermediates (see README pipeline)
+public/vo-model/*.onnx
+public/audio/vo-el/
+public/audio/vo/line-*.wav
+public/audio/music-bed.wav
+public/audio/trailer-score.wav
+public/audio/trailer-music.wav
+public/audio/trailer-sfx.wav

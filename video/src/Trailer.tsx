@@ -30,7 +30,7 @@ export const Trailer: React.FC<TrailerProps> = ({vertical = false}) => {
   return (
     <AbsoluteFill style={{backgroundColor: '#0D0E11'}}>
       <Backdrop />
-      <Audio src={staticFile('audio/trailer-score.wav')} />
+      <Audio src={staticFile('audio/trailer-final.wav')} />
       <Scene from={SCENES.hook[0]} to={SCENES.hook[1]}><Hook vertical={vertical} /></Scene>
       <Scene from={SCENES.meet[0]} to={SCENES.meet[1]}><Meet {...common} /></Scene>
       <Scene from={SCENES.versions[0]} to={SCENES.versions[1]}><Versions {...common} /></Scene>

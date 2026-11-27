@@ -20,18 +20,33 @@ See `VERIFICATION.md` for the measured results.
 - A Chromium build for Remotion. Set `REMOTION_BROWSER=/path/to/chrome` to use
   one; `remotion.config.ts` defaults to the path used in the build sandbox.
 
-## Render
+## Pipeline
 
-```bash
-cd video
-npm install
-npm run audio          # optional: regenerate the score (public/audio/*.wav)
-bash scripts/render.sh # both MP4s into out/
-npm run verify         # ffprobe checks + frame extraction
-npm run studio         # live preview / editing
-```
+1. **Footage:** `bash scripts/capture-shots.sh`. Builds a demo environment
+   (`scripts/make-demo-fixture.py`), makes three vault snapshots through the real
+   app, and captures the screens into `public/shots/`. Needs the release build
+   (`cargo build --release` in the repo root), Xvfb, xdotool, ImageMagick and root
+   (it writes `/home/deck` and briefly edits `/etc/hosts`). Details in `ASSETS.md`.
+2. **Narration:** `python3 scripts/make-narration-elevenlabs.py`. Reads the timed lines in
+   `scripts/cues.txt` and calls the ElevenLabs API (voice "George"). The API key is
+   injected by the sandbox proxy; elsewhere set `ELEVENLABS_API_KEY`.
+   (`scripts/make-narration.sh` is the older Piper version.)
+3. **Music + mix:** the bed is Kevin MacLeod's "Rynos Theme" (`public/music/`, CC BY 4.0).
+   `node scripts/make-audio.mjs` regenerates the sound effects, then
+   `bash scripts/make-mix.sh` trims the bed to 60 s, ducks it under the voice and
+   normalises to -14 LUFS into `public/audio/trailer-final.wav`.
+4. **Render:** `bash scripts/render.sh` renders both MP4s and re-encodes them to
+   limited-range yuv420p.
+5. **Verify:** see `VERIFICATION.md`.
 
-Single-frame preview: `npx remotion still src/index.ts GeoDeck-Launch-Trailer --frame=600 --output=out/preview.png`
+Live preview: `npm run studio`.
+Single frame: `npx remotion still src/index.ts GeoDeck-Launch-Trailer --frame=600 --output=out/preview.png`
+
+## Requirements
+
+- Node.js 18+ and npm (`npm install`), FFmpeg/FFprobe 5+
+- A Chromium build for Remotion: set `REMOTION_BROWSER=/path/to/chrome`
+  (`remotion.config.ts` defaults to the path used in the build sandbox)
 
 ## Editing
 

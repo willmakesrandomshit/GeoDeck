@@ -149,7 +149,7 @@ export const Versions: React.FC<ScenePropsBase> = ({vertical, width, height}) =>
         subSize={L.subSize}
         lines={['Your game.', 'Your versions.']}
         accentLine={1}
-        sub={['Steam library detection and isolated version slots.', 'Geometry Dash 1.900 through 2.2091.']}
+        sub={['Steam library detection and isolated version slots.', 'Geometry Dash 1.900 through 2.2091: 29 recognised builds.']}
         exitAt={f(6.4)}
       />
       <div style={{position: 'absolute', left: L.win.x, top: L.win.y}}>
@@ -168,9 +168,14 @@ export const Versions: React.FC<ScenePropsBase> = ({vertical, width, height}) =>
   );
 };
 
-// 00:17-00:24  "Discover. Manage. Customise." Mod browsing, profiles, packs.
+// 00:17-00:24  "Discover. Manage. Customise." Installed mods, dependency audit, .gdpack profiles.
 export const Mods: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
   const L = layout(vertical, width, height);
+  const cuts = [
+    {shot: 'mods', from: 0, to: f(2.4), a: {x: 0.3, y: 0.3, zoom: 1.4}, b: {x: 0.5, y: 0.45, zoom: 1.12}},
+    {shot: 'audit', from: f(2.4), to: f(4.7), a: {x: 0.35, y: 0.3, zoom: 1.3}, b: {x: 0.5, y: 0.42, zoom: 1.1}},
+    {shot: 'profiles', from: f(4.7), to: f(7), a: {x: 0.35, y: 0.32, zoom: 1.3}, b: {x: 0.62, y: 0.4, zoom: 1.1}},
+  ];
   return (
     <AbsoluteFill>
       <Copy
@@ -183,16 +188,21 @@ export const Mods: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
         sub={['Browse the Geode index, audit dependencies,', 'and move whole setups as portable .gdpack modpacks.']}
         exitAt={f(6.4)}
       />
-      <div style={{position: 'absolute', left: L.win.x, top: L.win.y}}>
-        <AppWindow
-          shot="mods"
-          width={L.win.w}
-          height={L.win.h}
-          from={zoomFor(vertical, {x: 0.22, y: 0.22, zoom: 1.45})}
-          to={zoomFor(vertical, {x: 0.66, y: 0.24, zoom: 1.2})}
-          travel={[0, f(7)]}
-        />
-      </div>
+      {cuts.map((c, i) => (
+        <Sequence key={c.shot} from={c.from} durationInFrames={c.to - c.from} layout="none">
+          <div style={{position: 'absolute', left: L.win.x, top: L.win.y}}>
+            <AppWindow
+              shot={c.shot}
+              width={L.win.w}
+              height={L.win.h}
+              from={zoomFor(vertical, c.a)}
+              to={zoomFor(vertical, c.b)}
+              travel={[0, c.to - c.from]}
+              entrance={i === 0 ? 'rise' : 'none'}
+            />
+          </div>
+        </Sequence>
+      ))}
     </AbsoluteFill>
   );
 };
@@ -217,8 +227,8 @@ export const Songs: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
           shot="songs"
           width={L.win.w}
           height={L.win.h}
-          from={zoomFor(vertical, {x: 0.5, y: 0.36, zoom: 1.4})}
-          to={zoomFor(vertical, {x: 0.42, y: 0.32, zoom: 1.08})}
+          from={zoomFor(vertical, {x: 0.45, y: 0.5, zoom: 1.25})}
+          to={zoomFor(vertical, {x: 0.5, y: 0.7, zoom: 1.12})}
           travel={[0, f(7)]}
         />
       </div>
@@ -259,8 +269,8 @@ export const Vault: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
           shot="backups"
           width={L.win.w}
           height={L.win.h}
-          from={zoomFor(vertical, {x: 0.5, y: 0.3, zoom: 1.0})}
-          to={zoomFor(vertical, {x: 0.6, y: 0.5, zoom: 1.4})}
+          from={zoomFor(vertical, {x: 0.45, y: 0.33, zoom: 1.45})}
+          to={zoomFor(vertical, {x: 0.55, y: 0.55, zoom: 1.2})}
           travel={[0, f(7)]}
         />
       </div>
@@ -275,7 +285,7 @@ export const Diagnostics: React.FC<ScenePropsBase> = ({vertical, width, height})
   const L = layout(vertical, width, height);
   const cuts: Array<{shot: string; from: number; to: number; word: string; sub: string}> = [
     {shot: 'health', from: 0, to: f(2.4), word: 'Diagnose.', sub: '8-point health check. Plain-English error explainer.'},
-    {shot: 'textures', from: f(2.4), to: f(4.6), word: 'Recover.', sub: 'Crash log inspector with redacted export.'},
+    {shot: 'crash', from: f(2.4), to: f(4.6), word: 'Recover.', sub: 'Crash log analyzer with one-click Disable Faulty Mod.'},
     {shot: 'settings', from: f(4.6), to: f(7), word: 'Stay current.', sub: 'Automatic updates, verified with SHA-256.'},
   ];
   return (
@@ -319,8 +329,26 @@ export const Montage: React.FC<ScenePropsBase> = ({vertical, width, height}) => 
   const frame = useCurrentFrame();
   const {fps} = useVideoConfig();
   const beat = Math.round(fps * 0.5);
-  const shots = ['home', 'mods', 'songs', 'backups', 'health', 'installs', 'settings', 'textures'];
-  const idx = Math.min(shots.length - 1, Math.floor(frame / beat));
+  // Every label below names a feature that exists in the repository.
+  type Slot = {shot: string; label: string; x: number; y: number; zoom: number};
+  const slots: Slot[] = [
+    {shot: 'home', label: 'Launcher', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'installs', label: 'Version slots · Steam detection', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'mods', label: 'Geode Mod Studio', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'profiles', label: '.gdpack modpacks · launch presets', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'songs', label: 'NONG song library', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'backups', label: 'Encrypted vault · AES-256-GCM', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'slots', label: 'Save slots · Save Doctor', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'compactor', label: 'Save compactor · .geodesync bundles', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'health', label: '8-point health check', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'crash', label: 'Crash log analyzer', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'audit', label: 'Dependency audit · Keybind doctor', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'levels', label: 'Level export (.gmd)', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'settings', label: 'Discord Rich Presence · auto updates', x: 0.5, y: 0.5, zoom: 1.0},
+    {shot: 'textures', label: 'Texture packs · PNG integrity', x: 0.4, y: 0.3, zoom: 1.7},
+  ];
+  const idx = Math.min(slots.length - 1, Math.floor(frame / beat));
+  const slot = slots[idx];
   const local = frame % beat;
   const p = spring({frame: local, fps, config: {damping: 200, stiffness: 220}});
   const inRust = frame < f(3.6);
@@ -340,12 +368,12 @@ export const Montage: React.FC<ScenePropsBase> = ({vertical, width, height}) => 
         }}
       >
         <AppWindow
-          key={shots[idx]}
-          shot={shots[idx]}
+          key={`${slot.shot}-${idx}`}
+          shot={slot.shot}
           width={winW}
           height={winH}
-          from={{x: 0.5, y: 0.5, zoom: vertical ? 1.5 : 1.0}}
-          to={{x: 0.5, y: 0.5, zoom: vertical ? 1.5 : 1.05}}
+          from={{x: slot.x, y: slot.y, zoom: slot.zoom * (vertical ? 1.5 : 1.0)}}
+          to={{x: slot.x, y: slot.y, zoom: slot.zoom * (vertical ? 1.55 : 1.05)}}
           travel={[0, beat]}
           entrance="none"
         />
@@ -383,7 +411,7 @@ export const Montage: React.FC<ScenePropsBase> = ({vertical, width, height}) => 
           color: C.accentBright,
         }}
       >
-        {['Launcher', 'Mods', 'Songs', 'Vault', 'Diagnostics', 'Installs', 'Settings', 'Textures'][idx]}
+        {slot.label}
       </div>
     </AbsoluteFill>
   );
@@ -441,6 +469,9 @@ export const Finale: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
         }}
       >
         Early alpha: expect rough edges. Back up your saves before you test.
+        <div style={{marginTop: 8, fontSize: vertical ? 20 : 17, color: C.textMuted}}>
+          Music: "Rynos Theme" by Kevin MacLeod (incompetech.com), CC BY 4.0
+        </div>
       </div>
     </AbsoluteFill>
   );
