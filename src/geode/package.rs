@@ -84,11 +84,31 @@ pub fn geode_loader_saved_path(local_data_dir: &Path) -> PathBuf {
         .join("saved.json")
 }
 
+/// Mod IDs end up in file names and directory paths (settings, unzipped cache, `.geode`
+/// packages). They come from untrusted data (`mod.json` inside packages, `.gdpack`
+/// manifests, the remote index), so anything that could escape its folder is rejected.
+/// Geode IDs only use ASCII letters, digits, `-`, `_` and `.`.
+pub fn is_safe_mod_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && !id.starts_with('.')
+        && !id.contains("..")
+        && id
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'))
+}
+
 pub fn mod_settings_path(local_data_dir: &Path, mod_id: &str) -> PathBuf {
+    // Defence in depth: never let an unvalidated ID choose a path outside geode/mods.
+    let component = if is_safe_mod_id(mod_id) {
+        mod_id
+    } else {
+        "_invalid-mod-id"
+    };
     local_data_dir
         .join("geode")
         .join("mods")
-        .join(mod_id)
+        .join(component)
         .join("settings.json")
 }
 
@@ -431,6 +451,10 @@ pub fn scan_installed_mods_with_data_dir(game_dir: &str, local_data_dir: &Path) 
 
         match read_geode_package_metadata(&path, &stem) {
             Ok((parsed, logo_rgba, sha256)) => {
+                if !is_safe_mod_id(&parsed.id) {
+                    // A mod ID that is not a plain identifier cannot be managed safely.
+                    continue;
+                }
                 let load_key = format!("should-load-{}", parsed.id);
                 let saved_enabled = saved
                     .get(&load_key)
@@ -554,6 +578,9 @@ pub fn remove_installed_mod(mod_item: &InstalledMod) -> Result<(), String> {
         fs::remove_file(path).map_err(|e| format!("delete {}: {e}", path.display()))?;
     }
     // Also clean up unzipped cache inside <game>/geode/unzipped/<id> if present
+    if !is_safe_mod_id(&mod_item.id) {
+        return Ok(());
+    }
     if let Some(mods_dir) = path.parent() {
         if let Some(geode_dir) = mods_dir.parent() {
             let unzipped = geode_dir.join("unzipped").join(&mod_item.id);

@@ -21,6 +21,15 @@ pub const SAVE_FILES: [&str; 4] = [
     "CCLocalLevels2.dat",
 ];
 
+/// Snapshot manifests can come from imported archives, so a stored file name must be a plain
+/// file name inside the snapshot folder, never a path that could point elsewhere on disk.
+pub fn is_plain_file_name(name: &str) -> bool {
+    !name.is_empty()
+        && name != "."
+        && name != ".."
+        && !name.contains(['/', '\\', '\0'])
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct VaultFileRecord {
     pub logical_name: String,
@@ -332,6 +341,7 @@ pub fn list_snapshots(backup_dir: &Path) -> Vec<SnapshotSummary> {
                 let total_bytes: u64 = mf
                     .files
                     .iter()
+                    .filter(|f| is_plain_file_name(&f.stored_name))
                     .filter_map(|f| fs::metadata(p.join(&f.stored_name)).ok().map(|m| m.len()))
                     .sum();
                 out.push(SnapshotSummary {
@@ -404,6 +414,12 @@ pub fn verify_snapshot_integrity(
                 None
             };
             for rec in &mf.files {
+                if !is_plain_file_name(&rec.stored_name) {
+                    return Err(format!(
+                        "Snapshot manifest references an unsafe file name '{}'",
+                        rec.stored_name
+                    ));
+                }
                 let fp = snapshot_dir.join(&rec.stored_name);
                 if !fp.is_file() {
                     return Err(format!("Missing file '{}' in snapshot", rec.stored_name));
@@ -505,6 +521,12 @@ pub fn restore_snapshot_with_paths(
                 None
             };
             for rec in &mf.files {
+                if !is_plain_file_name(&rec.stored_name) {
+                    return Err(format!(
+                        "Snapshot manifest references an unsafe file name '{}'",
+                        rec.stored_name
+                    ));
+                }
                 let stored = fs::read(snapshot_dir.join(&rec.stored_name))
                     .map_err(|e| format!("read {}: {e}", rec.stored_name))?;
                 let plain = if let Some(ref k) = key {

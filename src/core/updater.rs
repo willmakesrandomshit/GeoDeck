@@ -310,6 +310,10 @@ pub fn download_and_verify_update(
     asset_name: &str,
     expected_sha256: Option<&str>,
 ) -> Result<PathBuf, String> {
+    // Fail closed: never stage an update that cannot be verified.
+    let Some(expected) = expected_sha256.filter(|s| !s.trim().is_empty()) else {
+        return Err("This release publishes no SHA-256 checksum; refusing to stage an unverified update.".into());
+    };
     let updates_dir = crate::core::config::config_dir().join("updates");
     fs::create_dir_all(&updates_dir).map_err(|e| format!("Create updates dir: {e}"))?;
     let safe_name: String = asset_name
@@ -334,25 +338,31 @@ pub fn download_and_verify_update(
         .call()
         .map_err(|e| format!("Download failed: {e}"))?;
 
-    let mut reader = resp.into_reader();
+    // Cap the download so a bad or hostile release cannot exhaust memory.
+    const MAX_UPDATE_BYTES: u64 = 512 * 1024 * 1024;
+    let mut reader = resp.into_reader().take(MAX_UPDATE_BYTES + 1);
     let mut buf = Vec::new();
     reader
         .read_to_end(&mut buf)
         .map_err(|e| format!("Read stream failed: {e}"))?;
+    if buf.len() as u64 > MAX_UPDATE_BYTES {
+        return Err("Update download exceeds the size limit; refusing to stage it.".into());
+    }
 
     let mut hasher = Sha256::new();
     hasher.update(&buf);
     let actual = format!("{:x}", hasher.finalize());
 
-    if let Some(exp) = expected_sha256 {
-        if !actual.eq_ignore_ascii_case(exp.trim()) {
-            return Err(format!(
-                "Update SHA-256 mismatch: expected {}, got {}",
-                exp, actual
-            ));
-        }
+    if !actual.eq_ignore_ascii_case(expected.trim()) {
+        return Err(format!(
+            "Update SHA-256 mismatch: expected {}, got {}",
+            expected, actual
+        ));
     }
 
-    fs::write(&dest, &buf).map_err(|e| format!("Write staged update: {e}"))?;
+    // Write to a temp file and rename so a failed write never leaves a half-written update.
+    let tmp = dest.with_extension("part");
+    fs::write(&tmp, &buf).map_err(|e| format!("Write staged update: {e}"))?;
+    fs::rename(&tmp, &dest).map_err(|e| format!("Finalize staged update: {e}"))?;
     Ok(dest)
 }
