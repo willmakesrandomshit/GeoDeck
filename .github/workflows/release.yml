@@ -74,109 +74,9 @@ jobs:
           path: dist/GeoDeck-*
           if-no-files-found: error
 
-  build-linux:
-    name: Build Linux (x64, glibc 2.35 / SteamOS compat)
-    needs: resolve-tag
-    runs-on: ubuntu-22.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      - uses: Swatinem/rust-cache@v2
-      - name: Install native Linux GUI & GTK3/X11/Wayland build dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            pkg-config build-essential \
-            libgtk-3-dev libxkbcommon-dev libxkbcommon-x11-dev \
-            libxcb-render0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
-            libx11-dev libxi-dev libxcursor-dev libxrandr-dev \
-            libgl1-mesa-dev libwayland-dev libasound2-dev
-      - name: Run Rust integration & unit tests
-        run: cargo test -- --nocapture
-      - name: Build release binary
-        run: cargo build --release
-      - name: Package Linux tar.gz release asset
-        run: |
-          TAG="${{ needs.resolve-tag.outputs.tag }}"
-          mkdir -p dist/GeoDeck-Linux
-          cp target/release/geodedeck dist/GeoDeck-Linux/geodedeck
-          cp packaging/linux/run-geodeck.sh dist/GeoDeck-Linux/run-geodeck.sh
-          sed -i 's/\r$//' dist/GeoDeck-Linux/run-geodeck.sh
-          cp packaging/linux/geodeck.desktop dist/GeoDeck-Linux/geodeck.desktop
-          cp packaging/linux/README-Linux.txt dist/GeoDeck-Linux/README-Linux.txt
-          cp assets/geodeck_icon.png dist/GeoDeck-Linux/geodeck_icon.png
-          chmod +x dist/GeoDeck-Linux/geodedeck dist/GeoDeck-Linux/run-geodeck.sh
-
-          TAR_NAME="GeoDeck-${TAG}-linux-x64.tar.gz"
-          tar -czf "dist/${TAR_NAME}" -C dist GeoDeck-Linux
-          sha256sum "dist/${TAR_NAME}" | sed 's|dist/||' > "dist/${TAR_NAME}.sha256"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: geodeck-linux
-          path: dist/GeoDeck-*
-          if-no-files-found: error
-
-  build-macos:
-    name: Build macOS (${{ matrix.arch_label }})
-    needs: resolve-tag
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - rust_target: aarch64-apple-darwin
-            arch_label: arm64
-          - rust_target: x86_64-apple-darwin
-            arch_label: x64
-    runs-on: macos-15
-    steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin,x86_64-apple-darwin
-      - uses: Swatinem/rust-cache@v2
-      - name: Run Rust integration & unit tests (host arch)
-        if: matrix.arch_label == 'arm64'
-        run: cargo test -- --nocapture
-      - name: Build release binary for ${{ matrix.rust_target }}
-        env:
-          MACOSX_DEPLOYMENT_TARGET: "11.0"
-        run: cargo build --release --target "${{ matrix.rust_target }}"
-      - name: Assemble GeoDeck.app bundle & package zip
-        run: |
-          TAG="${{ needs.resolve-tag.outputs.tag }}"
-          mkdir -p dist icon.iconset
-          for sz in 16 32 64 128 256; do
-            sips -z "$sz" "$sz" assets/geodeck_icon.png --out "icon.iconset/icon_${sz}x${sz}.png" >/dev/null
-          done
-          cp icon.iconset/icon_32x32.png icon.iconset/icon_16x16@2x.png
-          cp icon.iconset/icon_64x64.png icon.iconset/icon_32x32@2x.png
-          cp icon.iconset/icon_256x256.png icon.iconset/icon_128x128@2x.png
-          cp assets/geodeck_icon.png icon.iconset/icon_256x256@2x.png
-          iconutil -c icns icon.iconset -o dist/GeoDeck.icns
-
-          APP="dist/GeoDeck.app"
-          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
-          cp "target/${{ matrix.rust_target }}/release/geodedeck" "$APP/Contents/MacOS/GeoDeck"
-          chmod +x "$APP/Contents/MacOS/GeoDeck"
-          cp packaging/macos/Info.plist "$APP/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${TAG}" "$APP/Contents/Info.plist"
-          cp dist/GeoDeck.icns "$APP/Contents/Resources/GeoDeck.icns"
-
-          codesign --force --deep --sign - "$APP"
-          codesign --verify --deep --strict "$APP"
-
-          ZIP_NAME="GeoDeck-${TAG}-macos-${{ matrix.arch_label }}.zip"
-          ditto -c -k --sequesterRsrc --keepParent "$APP" "dist/${ZIP_NAME}"
-          shasum -a 256 "dist/${ZIP_NAME}" | sed 's|dist/||' > "dist/${ZIP_NAME}.sha256"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: geodeck-macos-${{ matrix.arch_label }}
-          path: dist/GeoDeck-*.zip*
-          if-no-files-found: error
-
   publish-release:
-    name: Publish Cross-Platform Release
-    needs: [resolve-tag, build-windows, build-linux, build-macos]
+    name: Publish Windows Release
+    needs: [resolve-tag, build-windows]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -194,47 +94,48 @@ jobs:
 
           (
             cd release_assets
-            sha256sum *.exe *.zip *.tar.gz > SHA256SUMS.txt
+            sha256sum *.exe *.zip > SHA256SUMS.txt
           )
 
           cat <<'EOF' > release_notes.md
-          ## GeoDeck __TAG__ — Cross-Platform Release (Windows, Linux & macOS)
+          ## GeoDeck __TAG__ — Windows (x64) Release
 
           Full desktop manager for Geometry Dash with a redesigned **Precision Rhythm Workbench** UI, bundled static typography (Space Grotesk, IBM Plex Sans, JetBrains Mono), official Geometry Dash hero artwork, paginated Pointercrate Top 150 Demonlist + save progress matching, DPAPI AES-256-GCM Encrypted Save Vault, NONG song library, native Discord Rich Presence, and verified GitHub auto-updates.
 
           ### Downloads
           - **Windows (x64):** `GeoDeck-__TAG__-windows-x64.exe` (standalone) or `GeoDeck-__TAG__-windows-x64.zip`
-          - **Linux / Steam Deck (x64, glibc 2.35):** `GeoDeck-__TAG__-linux-x64.tar.gz`
-          - **macOS (Apple Silicon arm64):** `GeoDeck-__TAG__-macos-arm64.zip` (`GeoDeck.app`)
-          - **macOS (Intel x64):** `GeoDeck-__TAG__-macos-x64.zip` (`GeoDeck.app`)
           - **Checksums:** `SHA256SUMS.txt` and per-asset `.sha256` sidecars
 
           ### Highlights
           - **Demonlist & Player Progress:** Paginated Pointercrate Top 150 API client cross-referenced against local `CCGameManager.dat` progress (`BEATEN 100%` / `X% · N att`), Stars, Demons, Moons, Diamonds, Coins, Orbs, Active Grinds, and Completed Demons.
-          - **Encrypted Save Vault, Slots, Salvage & Compactor:** DPAPI / `0600` AES-256-GCM snapshots, Multi-Profile Save Slots, Save Doctor `.dat`/`.bak` salvage, `CCLocalLevels.dat` bloat compactor, and portable `.geodesync` setup bundles.
+          - **Encrypted Save Vault, Slots, Salvage & Compactor:** DPAPI AES-256-GCM snapshots, Multi-Profile Save Slots, Save Doctor `.dat`/`.bak` salvage, `CCLocalLevels.dat` bloat compactor, and portable `.geodesync` setup bundles.
           - **Texture Pack Manager & NONG Audio Hub:** Safe `.zip`/folder texture packs with automatic `Resources_Vanilla_Backup`, IEEE CRC-32 PNG structural verification, Practice Music / Death SFX replacers, and offline-first human-readable NONG song library.
           - **8-Point Health Diagnostics (`Ctrl+H`) & Mod Studio:** Steam layout check, Windows PE x86/x64 audit, VC++ x86 check, OneDrive stub pinning, Keybind Doctor collision scanner, Quick Mod Presets, Steam Update Lock, `prevter.imageplus` safeguard, and native Discord RPC.
           EOF
           sed -i "s/__TAG__/${TAG}/g" release_notes.md
 
           if [[ "$TAG" == Alpha-* || "$TAG" == Beta-* || "$TAG" == RC-* || "$TAG" == *-* ]]; then
-            REL_FLAGS=(--prerelease)
-          else
-            REL_FLAGS=(--prerelease=false --latest)
-          fi
-
-          if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
-            gh release upload "$TAG" release_assets/* --repo "${{ github.repository }}" --clobber
-            gh release edit "$TAG" \
-              --repo "${{ github.repository }}" \
-              "${REL_FLAGS[@]}" \
-              --title "GeoDeck ${TAG}" \
-              --notes-file release_notes.md
-          else
-            if [[ "$TAG" == Alpha-* || "$TAG" == Beta-* || "$TAG" == RC-* || "$TAG" == *-* ]]; then
+            if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              gh release upload "$TAG" release_assets/* --repo "${{ github.repository }}" --clobber
+              gh release edit "$TAG" \
+                --repo "${{ github.repository }}" \
+                --prerelease \
+                --title "GeoDeck ${TAG}" \
+                --notes-file release_notes.md
+            else
               gh release create "$TAG" release_assets/* \
                 --repo "${{ github.repository }}" \
                 --prerelease \
+                --title "GeoDeck ${TAG}" \
+                --notes-file release_notes.md
+            fi
+          else
+            if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
+              gh release upload "$TAG" release_assets/* --repo "${{ github.repository }}" --clobber
+              gh release edit "$TAG" \
+                --repo "${{ github.repository }}" \
+                --prerelease=false \
+                --latest \
                 --title "GeoDeck ${TAG}" \
                 --notes-file release_notes.md
             else
