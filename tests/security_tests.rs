@@ -230,3 +230,20 @@ fn pe_header_parsing_rejects_hostile_offsets_without_panicking() {
     buf[0x3C..0x40].copy_from_slice(&0x70u32.to_le_bytes());
     assert!(parse_pe_timestamp_bytes(&buf).is_err());
 }
+
+#[cfg(unix)]
+#[test]
+fn vault_key_file_is_created_owner_only() {
+    use geodedeck::backup::crypto::load_or_create_vault_key;
+    use std::os::unix::fs::PermissionsExt;
+
+    let root = temp_dir("vaultkey");
+    let key_path = root.join("nested/vault.key.dpapi");
+    let key = load_or_create_vault_key(&key_path).unwrap();
+    assert_eq!(key.len(), 32);
+    let mode = fs::metadata(&key_path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "vault key must be owner read/write only, got {mode:o}");
+    // Loading again returns the same key.
+    assert_eq!(load_or_create_vault_key(&key_path).unwrap(), key);
+    let _ = fs::remove_dir_all(&root);
+}

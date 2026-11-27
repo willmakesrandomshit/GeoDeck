@@ -115,12 +115,25 @@ pub fn load_or_create_vault_key(key_path: &Path) -> Result<[u8; 32], String> {
     let mut key = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut key);
     let protected = dpapi_protect(&key)?;
-    fs::write(key_path, &protected).map_err(|e| format!("write vault key: {e}"))?;
     #[cfg(unix)]
     {
-        use std::os::unix::fs::PermissionsExt;
+        // Create the key file already restricted to the owner, so there is no window in
+        // which another local user could read it before permissions are tightened.
+        use std::io::Write;
+        use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
+        let mut f = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(key_path)
+            .map_err(|e| format!("write vault key: {e}"))?;
+        f.write_all(&protected)
+            .map_err(|e| format!("write vault key: {e}"))?;
         let _ = fs::set_permissions(key_path, fs::Permissions::from_mode(0o600));
     }
+    #[cfg(not(unix))]
+    fs::write(key_path, &protected).map_err(|e| format!("write vault key: {e}"))?;
     Ok(key)
 }
 
