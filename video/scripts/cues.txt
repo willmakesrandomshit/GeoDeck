@@ -1,0 +1,16 @@
+0.7|Managing Geometry Dash just changed.
+5.3|Meet GeoDeck. One application. Everything Geometry Dash.
+10.5|Your game. Your versions.
+12.8|Steam detection and isolated version slots.
+17.4|Discover. Manage. Customise.
+20.6|Browse the Geode index and share portable modpacks.
+24.4|Your soundtrack. Your way.
+26.9|Replace any track. The original is always kept.
+31.4|Protect your progress.
+33.4|Automatic backups. AES-256 encryption.
+38.4|Diagnose. Recover. Stay current.
+41.8|Health checks and crash logs.
+45.4|Built in Rust.
+48.7|Built for Geometry Dash.
+52.9|GeoDeck. Alpha 1.0.0. Out now on GitHub.
+57.3|Early alpha. Back up your saves.
