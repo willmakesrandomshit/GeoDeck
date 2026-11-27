@@ -127,8 +127,8 @@ export const Meet: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
           shot="home"
           width={L.win.w}
           height={L.win.h}
-          from={zoomFor(vertical, {x: 0.3, y: 0.28, zoom: 1.9})}
-          to={zoomFor(vertical, {x: 0.5, y: 0.5, zoom: 1})}
+          from={zoomFor(vertical, {x: 0.3, y: 0.3, zoom: 1.7})}
+          to={zoomFor(vertical, {x: 0.42, y: 0.42, zoom: 1.35})}
           travel={[0, f(3.2)]}
           delay={2}
         />
@@ -157,12 +157,12 @@ export const Versions: React.FC<ScenePropsBase> = ({vertical, width, height}) =>
           shot="installs"
           width={L.win.w}
           height={L.win.h}
-          from={zoomFor(vertical, {x: 0.3, y: 0.3, zoom: 1.35})}
-          to={zoomFor(vertical, {x: 0.45, y: 0.36, zoom: 1.05})}
+          from={zoomFor(vertical, {x: 0.3, y: 0.3, zoom: 1.6})}
+          to={zoomFor(vertical, {x: 0.36, y: 0.36, zoom: 1.45})}
           travel={[0, f(7)]}
         />
-        {!vertical && <Chip text="Steam detection" delay={f(3.2)} x={-10} y={L.win.h + 24} />}
-        {!vertical && <Chip text="Version slots" delay={f(4.2)} x={220} y={L.win.h + 24} />}
+        {!vertical && <Chip text="Steam detection" delay={f(3.2)} x={0} y={L.win.h + 24} />}
+        {!vertical && <Chip text="Version slots" delay={f(4.2)} x={290} y={L.win.h + 24} />}
       </div>
     </AbsoluteFill>
   );
@@ -172,9 +172,9 @@ export const Versions: React.FC<ScenePropsBase> = ({vertical, width, height}) =>
 export const Mods: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
   const L = layout(vertical, width, height);
   const cuts = [
-    {shot: 'mods', from: 0, to: f(2.4), a: {x: 0.3, y: 0.3, zoom: 1.4}, b: {x: 0.5, y: 0.45, zoom: 1.12}},
-    {shot: 'audit', from: f(2.4), to: f(4.7), a: {x: 0.35, y: 0.3, zoom: 1.3}, b: {x: 0.5, y: 0.42, zoom: 1.1}},
-    {shot: 'profiles', from: f(4.7), to: f(7), a: {x: 0.35, y: 0.32, zoom: 1.3}, b: {x: 0.62, y: 0.4, zoom: 1.1}},
+    {shot: 'mods', from: 0, to: f(2.4), a: {x: 0.3, y: 0.4, zoom: 1.6}, b: {x: 0.3, y: 0.42, zoom: 1.5}},
+    {shot: 'audit', from: f(2.4), to: f(4.7), a: {x: 0.3, y: 0.3, zoom: 1.6}, b: {x: 0.3, y: 0.36, zoom: 1.5}},
+    {shot: 'profiles', from: f(4.7), to: f(7), a: {x: 0.55, y: 0.36, zoom: 1.6}, b: {x: 0.55, y: 0.38, zoom: 1.5}},
   ];
   return (
     <AbsoluteFill>
@@ -185,7 +185,7 @@ export const Mods: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
         subSize={L.subSize}
         lines={['Discover.', 'Manage.', 'Customise.']}
         accentLine={2}
-        sub={['Browse the Geode index, audit dependencies,', 'and move whole setups as portable .gdpack modpacks.']}
+        sub={['Browse the Geode index.', 'Audit dependencies. Share modpacks.']}
         exitAt={f(6.4)}
       />
       {cuts.map((c, i) => (
@@ -227,8 +227,8 @@ export const Songs: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
           shot="songs"
           width={L.win.w}
           height={L.win.h}
-          from={zoomFor(vertical, {x: 0.45, y: 0.5, zoom: 1.25})}
-          to={zoomFor(vertical, {x: 0.5, y: 0.7, zoom: 1.12})}
+          from={zoomFor(vertical, {x: 0.3, y: 0.55, zoom: 1.6})}
+          to={zoomFor(vertical, {x: 0.3, y: 0.68, zoom: 1.5})}
           travel={[0, f(7)]}
         />
       </div>
@@ -269,8 +269,8 @@ export const Vault: React.FC<ScenePropsBase> = ({vertical, width, height}) => {
           shot="backups"
           width={L.win.w}
           height={L.win.h}
-          from={zoomFor(vertical, {x: 0.45, y: 0.33, zoom: 1.45})}
-          to={zoomFor(vertical, {x: 0.55, y: 0.55, zoom: 1.2})}
+          from={zoomFor(vertical, {x: 0.3, y: 0.4, zoom: 1.6})}
+          to={zoomFor(vertical, {x: 0.3, y: 0.52, zoom: 1.5})}
           travel={[0, f(7)]}
         />
       </div>
@@ -311,8 +311,8 @@ export const Diagnostics: React.FC<ScenePropsBase> = ({vertical, width, height})
                 shot={c.shot}
                 width={L.win.w}
                 height={L.win.h}
-                from={zoomFor(vertical, {x: 0.45, y: 0.3, zoom: 1.25})}
-                to={zoomFor(vertical, {x: 0.5, y: 0.5, zoom: 1.0})}
+                from={zoomFor(vertical, {x: 0.3, y: 0.3, zoom: 1.6})}
+                to={zoomFor(vertical, {x: 0.3, y: 0.36, zoom: 1.5})}
                 travel={[0, c.to - c.from]}
                 entrance="none"
               />

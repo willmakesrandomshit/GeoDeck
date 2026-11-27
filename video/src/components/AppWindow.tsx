@@ -59,8 +59,10 @@ export const AppWindow: React.FC<Props> = ({
   const scale = base * focus.zoom;
   const imgW = sw * scale;
   const imgH = sh * scale;
-  const left = width / 2 - focus.x * imgW;
-  const top = viewH / 2 - focus.y * imgH;
+  // Clamp so the screenshot always covers the window: no gaps, no black edges.
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  const left = clamp(width / 2 - focus.x * imgW, Math.min(0, width - imgW), 0);
+  const top = clamp(viewH / 2 - focus.y * imgH, Math.min(0, viewH - imgH), 0);
   const rise = entrance === 'rise' ? (1 - enter) * 60 : 0;
 
   return (
