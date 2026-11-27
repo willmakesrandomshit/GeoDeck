@@ -28,7 +28,7 @@ use crate::core::worker::{
 use crate::geode::dependency::{audit_mods, CompatibilityAudit};
 use crate::geode::exporter::{export_gdpack, import_gdpack};
 use crate::geode::index_api::{
-    check_updates_for_installed, fetch_latest_loader_release, fetch_mod_logo_rgba,
+    check_updates_for_installed, fetch_latest_loader_release,
     install_mod_from_index, install_mod_version, install_or_update_geode_loader,
     install_specific_mod_version, search_index_mods, IndexMod, IndexModVersion, LoaderRelease,
 };
@@ -62,9 +62,7 @@ use crate::tools::songs::{
     resolve_missing_song_metadata, scan_song_cache, SongCacheReport, SongFormatFilter,
     SongSortMode, SongStatusFilter,
 };
-use crate::ui::assets::{
-    compose_mod_cover_texture, load_brand_icon_texture, load_brand_lockup_texture,
-};
+use crate::ui::assets::{load_brand_icon_texture, load_brand_lockup_texture};
 use crate::ui::icons::ph;
 use crate::ui::theme::*;
 use crate::ui::views;
@@ -217,9 +215,6 @@ pub struct GeodeDeckApp {
     pub brand_lockup: Option<TextureHandle>,
     pub brand_icon: Option<TextureHandle>,
     pub logo_textures: HashMap<String, TextureHandle>,
-    pub mod_cover_textures: HashMap<String, TextureHandle>,
-    pub remote_logo_rgba: HashMap<String, (u32, u32, Vec<u8>)>,
-    pub requested_remote_logos: HashSet<String>,
     game_art: Option<(String, Option<TextureHandle>)>,
 
     pub max_perf_applied: bool,
@@ -329,9 +324,6 @@ impl GeodeDeckApp {
             brand_lockup,
             brand_icon,
             logo_textures: HashMap::new(),
-            mod_cover_textures: HashMap::new(),
-            remote_logo_rgba: HashMap::new(),
-            requested_remote_logos: HashSet::new(),
             game_art: None,
 
             max_perf_applied: false,
@@ -381,6 +373,8 @@ impl GeodeDeckApp {
             if app.config.check_updates_on_startup {
                 app.check_app_update_silent_async();
             }
+        } else if initial_tab == Some(NavTab::Demonlist) {
+            app.refresh_demonlist_async();
         }
         app.initialized = true;
         app
@@ -393,40 +387,10 @@ impl GeodeDeckApp {
                 return texture.clone();
             }
         }
-        let texture = if path.is_empty() {
-            None
-        } else {
-            crate::ui::assets::load_game_background(ctx, Path::new(path))
-        };
+        let texture = Some(crate::ui::assets::load_game_background(ctx, Path::new(path)))
+            .flatten();
         self.game_art = Some((path.clone(), texture.clone()));
         texture
-    }
-
-    pub fn mod_cover_texture(
-        &mut self,
-        ctx: &egui::Context,
-        mod_id: &str,
-        local_logo: Option<&(u32, u32, Vec<u8>)>,
-        seed_idx: usize,
-    ) -> TextureHandle {
-        let effective_logo = local_logo.or_else(|| self.remote_logo_rgba.get(mod_id));
-        if effective_logo.is_none() && !self.requested_remote_logos.contains(mod_id) {
-            self.requested_remote_logos.insert(mod_id.to_string());
-            let id = mod_id.to_string();
-            spawn_job(self.bus.sender(), self.egui_ctx.clone(), move |tx| {
-                if let Some(rgba) = fetch_mod_logo_rgba(&id) {
-                    let _ = tx.send(WorkerEvent::ModLogoFetched { mod_id: id, rgba });
-                }
-            });
-        }
-
-        let cache_key = format!("{mod_id}_{}", effective_logo.is_some());
-        if let Some(tex) = self.mod_cover_textures.get(&cache_key) {
-            return tex.clone();
-        }
-        let tex = compose_mod_cover_texture(ctx, mod_id, effective_logo, seed_idx);
-        self.mod_cover_textures.insert(cache_key, tex.clone());
-        tex
     }
 
     pub fn navigate_to(&mut self, target: NavTab) {
@@ -1291,7 +1255,6 @@ impl GeodeDeckApp {
         }
         self.config.save();
         self.logo_textures.clear();
-        self.mod_cover_textures.clear();
         self.integrity_report = IntegrityReport::default();
         self.apply_max_performance_async();
         self.refresh_probe_async();
@@ -1653,11 +1616,7 @@ impl GeodeDeckApp {
                         Err(e) => self.push_toast(ToastKind::Error, "Loader Install Failed", e),
                     }
                 }
-                WorkerEvent::ModLogoFetched { mod_id, rgba } => {
-                    self.remote_logo_rgba.insert(mod_id.clone(), rgba);
-                    self.mod_cover_textures.remove(&format!("{mod_id}_false"));
-                    self.mod_cover_textures.remove(&format!("{mod_id}_true"));
-                }
+                WorkerEvent::ModLogoFetched { .. } => {}
                 WorkerEvent::GameExited {
                     exit_code,
                     duration_secs,
@@ -1757,12 +1716,21 @@ impl eframe::App for GeodeDeckApp {
 
         // Check for screenshot capture mode completion
         if let Some(ref out_path) = self.capture_output.clone() {
-            let ready_delay = if self.initial_sync_complete {
-                Duration::from_millis(1600)
+            let ready_delay = if self.initial_sync_complete
+                && (!self.installed_mods.is_empty() || self.startup_time.elapsed() >= Duration::from_millis(2400))
+            {
+                Duration::from_millis(1200)
             } else {
-                Duration::from_millis(2800)
+                Duration::from_millis(3200)
             };
-            if !self.capture_requested && self.capture_started_at.elapsed() >= ready_delay {
+            let demon_ready = self.active_tab != NavTab::Demonlist
+                || (!self.demonlist_loading
+                    && (!self.demonlist.is_empty() || self.demonlist_error.is_some()))
+                || self.capture_started_at.elapsed() >= Duration::from_secs(6);
+            if !self.capture_requested
+                && demon_ready
+                && self.capture_started_at.elapsed() >= ready_delay
+            {
                 self.capture_requested = true;
                 ctx.send_viewport_cmd(egui::ViewportCommand::Screenshot);
             }
@@ -1849,20 +1817,17 @@ impl eframe::App for GeodeDeckApp {
                     if let Some(ref icon_tex) = self.brand_icon {
                         ui.add(
                             egui::Image::new(icon_tex)
-                                .fit_to_exact_size(Vec2::splat(22.0))
-                                .rounding(5.0),
+                                .fit_to_exact_size(Vec2::splat(20.0))
+                                .rounding(4.0),
                         );
                     }
                     ui.label(semibold_text("GeoDeck", 12.5, TEXT_PRIMARY));
-                    badge_pill(
-                        ui,
-                        current_app_display_version(),
-                        ACCENT_EPIC_BRIGHT,
-                        ACCENT_EPIC_SOFT,
-                    );
-                    if let Some(ref gd) = self.probe.gd_version {
-                        badge_pill(ui, &format!("GD {gd}"), TEXT_SECONDARY, BG_ELEVATED);
-                    }
+                    let ver_meta = if let Some(ref gd) = self.probe.gd_version {
+                        format!("{}  ·  GD {gd}", current_app_display_version())
+                    } else {
+                        current_app_display_version().to_string()
+                    };
+                    ui.label(mono_text(ver_meta, 11.0, TEXT_MUTED));
 
                     let drag_w = (ui.available_width() - 108.0).max(80.0);
                     let (_, drag_resp) =
@@ -1882,13 +1847,13 @@ impl eframe::App for GeodeDeckApp {
                         )
                         .fill(Color32::TRANSPARENT)
                         .stroke(Stroke::NONE)
-                        .rounding(Rounding::same(8.0))
+                        .rounding(Rounding::same(6.0))
                         .min_size(Vec2::new(28.0, 24.0));
                         let close_resp = ui.add(close_btn).on_hover_text("Close");
                         if close_resp.hovered() {
                             ui.painter().rect_filled(
                                 close_resp.rect,
-                                Rounding::same(8.0),
+                                Rounding::same(6.0),
                                 STATUS_ERR_SOFT,
                             );
                             ui.painter().text(
@@ -1911,7 +1876,7 @@ impl eframe::App for GeodeDeckApp {
                                 )
                                 .fill(Color32::TRANSPARENT)
                                 .stroke(Stroke::NONE)
-                                .rounding(Rounding::same(8.0))
+                                .rounding(Rounding::same(6.0))
                                 .min_size(Vec2::new(28.0, 24.0)),
                             )
                             .on_hover_text(if is_max { "Restore" } else { "Maximize" })
@@ -1927,7 +1892,7 @@ impl eframe::App for GeodeDeckApp {
                                 )
                                 .fill(Color32::TRANSPARENT)
                                 .stroke(Stroke::NONE)
-                                .rounding(Rounding::same(8.0))
+                                .rounding(Rounding::same(6.0))
                                 .min_size(Vec2::new(28.0, 24.0)),
                             )
                             .on_hover_text("Minimize")
@@ -1942,14 +1907,14 @@ impl eframe::App for GeodeDeckApp {
         // === Sidebar Navigation with Custom GeoDeck Orbital Purple Logo ===
         egui::SidePanel::left("epic_sidebar")
             .resizable(false)
-            .exact_width(214.0)
+            .exact_width(204.0)
             .frame(
                 egui::Frame::none()
                     .fill(BG_SIDEBAR)
                     .stroke(Stroke::new(1.0_f32, BORDER_SUBTLE))
                     .inner_margin(Margin {
-                        left: 14.0,
-                        right: 14.0,
+                        left: 12.0,
+                        right: 12.0,
                         top: 10.0,
                         bottom: 12.0,
                     }),
@@ -1960,7 +1925,7 @@ impl eframe::App for GeodeDeckApp {
                         let resp = ui
                             .add(
                                 egui::Image::new(lockup)
-                                    .fit_to_exact_size(Vec2::new(152.0, 53.0))
+                                    .fit_to_exact_size(Vec2::new(146.0, 51.0))
                                     .sense(egui::Sense::click()),
                             )
                             .on_hover_text("GeoDeck Home");
@@ -1972,8 +1937,8 @@ impl eframe::App for GeodeDeckApp {
                     }
                 });
                 ui.add_space(8.0);
-                ui.separator();
-                ui.add_space(8.0);
+                row_divider(ui);
+                ui.add_space(6.0);
 
                 let nav_items = [
                     (NavTab::Home, ph::HOUSE, "Home", 0usize),
@@ -1988,42 +1953,37 @@ impl eframe::App for GeodeDeckApp {
                 for (tab, icon, label, count_badge) in nav_items {
                     let selected = self.active_tab == tab;
                     let fill = if selected {
-                        Color32::from_rgb(30, 25, 48)
+                        BG_ELEVATED
                     } else {
                         Color32::TRANSPARENT
                     };
                     let fg = if selected {
-                        Color32::WHITE
+                        TEXT_PRIMARY
                     } else {
                         TEXT_SECONDARY
                     };
                     let icon_col = if selected { ACCENT_EPIC_BRIGHT } else { fg };
 
+                    let bg_slot = ui.painter().add(egui::Shape::Noop);
                     let resp = egui::Frame::none()
                         .fill(fill)
-                        .stroke(if selected {
-                            Stroke::new(1.0_f32, BORDER_GLOW.gamma_multiply(0.55))
-                        } else {
-                            Stroke::NONE
-                        })
                         .rounding(Rounding::same(RADIUS_BUTTON))
-                        .inner_margin(Margin::symmetric(12.0, 7.0))
+                        .inner_margin(Margin::symmetric(11.0, 7.0))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(icon).size(15.5).color(icon_col));
+                                ui.label(RichText::new(icon).size(15.0).color(icon_col));
                                 ui.add_space(6.0);
                                 ui.label(semibold_text(label, 13.0, fg));
                                 if count_badge > 0 {
                                     ui.with_layout(
                                         egui::Layout::right_to_left(egui::Align::Center),
                                         |ui| {
-                                            badge_pill(
-                                                ui,
-                                                &count_badge.to_string(),
+                                            ui.label(mono_text(
+                                                count_badge.to_string(),
+                                                11.0,
                                                 ACCENT_EPIC_BRIGHT,
-                                                ACCENT_EPIC_SOFT,
-                                            );
+                                            ));
                                         },
                                     );
                                 }
@@ -2034,16 +1994,19 @@ impl eframe::App for GeodeDeckApp {
 
                     if selected {
                         let bar = egui::Rect::from_min_size(
-                            egui::pos2(resp.rect.left() + 2.0, resp.rect.top() + 6.0),
-                            Vec2::new(3.0, resp.rect.height() - 12.0),
+                            egui::pos2(resp.rect.left() + 1.0, resp.rect.top() + 6.0),
+                            Vec2::new(2.0, resp.rect.height() - 12.0),
                         );
                         ui.painter()
-                            .rect_filled(bar, Rounding::same(99.0), ACCENT_EPIC);
+                            .rect_filled(bar, Rounding::same(1.0), ACCENT_EPIC);
                     } else if resp.hovered() {
-                        ui.painter().rect_filled(
-                            resp.rect,
-                            Rounding::same(RADIUS_BUTTON),
-                            Color32::from_rgba_premultiplied(255, 255, 255, 8),
+                        ui.painter().set(
+                            bg_slot,
+                            egui::Shape::rect_filled(
+                                resp.rect,
+                                Rounding::same(RADIUS_BUTTON),
+                                BG_HOVER,
+                            ),
                         );
                     }
                     if resp.clicked() {
@@ -2058,33 +2021,29 @@ impl eframe::App for GeodeDeckApp {
                 ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {
                     ui.add_space(2.0);
                     ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!("GeoDeck {}", current_app_display_version()))
-                                .size(11.0)
-                                .color(TEXT_MUTED),
-                        );
+                        ui.label(mono_text(
+                            format!("GeoDeck {}", current_app_display_version()),
+                            10.5,
+                            TEXT_MUTED,
+                        ));
                     });
                     ui.add_space(4.0);
 
                     let set_sel = self.active_tab == NavTab::Settings;
-                    let set_fg = if set_sel { Color32::WHITE } else { TEXT_SECONDARY };
+                    let set_fg = if set_sel { TEXT_PRIMARY } else { TEXT_SECONDARY };
+                    let set_bg_slot = ui.painter().add(egui::Shape::Noop);
                     let set_resp = egui::Frame::none()
                         .fill(if set_sel {
-                            Color32::from_rgb(30, 25, 48)
+                            BG_ELEVATED
                         } else {
                             Color32::TRANSPARENT
                         })
-                        .stroke(if set_sel {
-                            Stroke::new(1.0_f32, BORDER_GLOW.gamma_multiply(0.55))
-                        } else {
-                            Stroke::NONE
-                        })
                         .rounding(Rounding::same(RADIUS_BUTTON))
-                        .inner_margin(Margin::symmetric(12.0, 7.0))
+                        .inner_margin(Margin::symmetric(11.0, 7.0))
                         .show(ui, |ui| {
                             ui.set_min_width(ui.available_width());
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(ph::GEAR_SIX).size(15.5).color(if set_sel {
+                                ui.label(RichText::new(ph::GEAR_SIX).size(15.0).color(if set_sel {
                                     ACCENT_EPIC_BRIGHT
                                 } else {
                                     set_fg
@@ -2095,35 +2054,25 @@ impl eframe::App for GeodeDeckApp {
                         })
                         .response
                         .interact(egui::Sense::click());
-                    if !set_sel && set_resp.hovered() {
-                        ui.painter().rect_filled(
-                            set_resp.rect,
-                            Rounding::same(RADIUS_BUTTON),
-                            Color32::from_rgba_premultiplied(255, 255, 255, 8),
+                    if set_sel {
+                        let bar = egui::Rect::from_min_size(
+                            egui::pos2(set_resp.rect.left() + 1.0, set_resp.rect.top() + 6.0),
+                            Vec2::new(2.0, set_resp.rect.height() - 12.0),
+                        );
+                        ui.painter()
+                            .rect_filled(bar, Rounding::same(1.0), ACCENT_EPIC);
+                    } else if set_resp.hovered() {
+                        ui.painter().set(
+                            set_bg_slot,
+                            egui::Shape::rect_filled(
+                                set_resp.rect,
+                                Rounding::same(RADIUS_BUTTON),
+                                BG_HOVER,
+                            ),
                         );
                     }
                     if set_resp.clicked() {
                         self.navigate_to(NavTab::Settings);
-                    }
-
-                    if ui.available_height() >= 82.0 {
-                        ui.add_space(4.0);
-                        inset_frame().show(ui, |ui| {
-                            ui.set_min_width(ui.available_width());
-                            ui.horizontal(|ui| {
-                                ui.label(
-                                    RichText::new(ph::LIGHTNING)
-                                        .size(13.0)
-                                        .color(ACCENT_EPIC_BRIGHT),
-                                );
-                                ui.label(semibold_text("Max Performance", 11.5, TEXT_PRIMARY));
-                            });
-                            ui.label(
-                                RichText::new("Auto-applied on launch")
-                                    .size(10.5)
-                                    .color(TEXT_MUTED),
-                            );
-                        });
                     }
 
                     if let Some(busy) = self
@@ -2150,16 +2099,16 @@ impl eframe::App for GeodeDeckApp {
 
         // === Top Content Toolbar ===
         egui::TopBottomPanel::top("content_toolbar")
-            .exact_height(54.0)
+            .exact_height(46.0)
             .frame(
                 egui::Frame::none()
                     .fill(BG_VOID)
                     .stroke(Stroke::new(1.0_f32, BORDER_SUBTLE))
                     .inner_margin(Margin {
-                        left: 24.0,
-                        right: 24.0,
-                        top: 8.0,
-                        bottom: 8.0,
+                        left: 22.0,
+                        right: 22.0,
+                        top: 7.0,
+                        bottom: 7.0,
                     }),
             )
             .show(ctx, |ui| {
@@ -2181,7 +2130,7 @@ impl eframe::App for GeodeDeckApp {
                         self.navigate_forward();
                     }
                     ui.add_space(6.0);
-                    ui.label(bold_text(
+                    ui.label(display_text(
                         match self.active_tab {
                             NavTab::Home => "Home",
                             NavTab::Library => "Installs",
@@ -2191,67 +2140,66 @@ impl eframe::App for GeodeDeckApp {
                             NavTab::Tools => "Tools",
                             NavTab::Settings => "Settings",
                         },
-                        16.5,
+                        16.0,
                         TEXT_PRIMARY,
                     ));
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.spacing_mut().item_spacing.x = 8.0;
+                        ui.spacing_mut().item_spacing.x = 10.0;
                         if ui
                             .add(ghost_icon_button(ph::ARROWS_CLOCKWISE))
-                            .on_hover_text("Refresh installation, mods, backups & song cache")
+                            .on_hover_text("Refresh workspace (F5)")
                             .clicked()
                         {
                             self.refresh_all_async();
                         }
-                        if ui
-                            .add(epic_secondary_button(
-                                ph::SHIELD_CHECK,
-                                &format!("Backups ({})", self.snapshots.len()),
-                            ))
-                            .clicked()
-                        {
-                            self.navigate_to(NavTab::Backups);
-                        }
-                        if ui
-                            .add(epic_secondary_button(
-                                ph::PUZZLE_PIECE,
-                                &format!("Mods ({})", self.installed_mods.len()),
-                            ))
-                            .clicked()
-                        {
-                            self.ui_state.mods_subtab = ModsSubTab::Installed;
-                            self.navigate_to(NavTab::Mods);
-                        }
+                        let slot_name = self
+                            .config
+                            .active_installation()
+                            .map(|i| i.name.as_str())
+                            .unwrap_or("No Slot");
+                        let geode_tag = if self.probe.geode_installed {
+                            self.probe
+                                .geode_version
+                                .as_deref()
+                                .map(|v| format!("Geode {v}"))
+                                .unwrap_or_else(|| "Geode Ready".into())
+                        } else {
+                            "No Geode".into()
+                        };
+                        ui.label(mono_text(
+                            format!("{slot_name}  ·  {geode_tag}"),
+                            11.0,
+                            TEXT_MUTED,
+                        ));
                     });
                 });
             });
 
-        // === Central Scrollable Content with Atmospheric Header Glow ===
+        // === Central Scrollable Content ===
         egui::CentralPanel::default()
             .frame(
                 egui::Frame::none()
                     .fill(BG_VOID)
                     .inner_margin(Margin {
-                        left: 24.0,
-                        right: 24.0,
+                        left: 22.0,
+                        right: 22.0,
                         top: 16.0,
-                        bottom: 20.0,
+                        bottom: 18.0,
                     }),
             )
             .show(ctx, |ui| {
-                paint_ambient_header_glow(ui.painter(), ui.max_rect());
-
                 if !self.update_banner_dismissed {
                     if let Some(Ok(info)) = self.app_update_result.clone() {
                         if info.update_available {
-                            egui::Frame::none()
-                                .fill(ACCENT_EPIC_SOFT)
-                                .stroke(Stroke::new(1.0_f32, BORDER_GLOW.gamma_multiply(0.8)))
+                            let banner = egui::Frame::none()
+                                .fill(BG_ELEVATED)
+                                .stroke(Stroke::new(1.0_f32, BORDER_STRONG))
                                 .rounding(Rounding::same(RADIUS_CARD))
                                 .inner_margin(Margin::symmetric(14.0, 10.0))
                                 .show(ui, |ui| {
                                     ui.horizontal_wrapped(|ui| {
+                                        ui.add_space(4.0);
                                         ui.label(
                                             RichText::new(ph::CLOUD_ARROW_DOWN)
                                                 .size(16.0)
@@ -2259,20 +2207,17 @@ impl eframe::App for GeodeDeckApp {
                                         );
                                         ui.label(bold_text(
                                             &format!(
-                                                "GeoDeck {} is available!",
+                                                "GeoDeck {} is available",
                                                 info.latest_version
                                             ),
                                             13.0,
                                             TEXT_PRIMARY,
                                         ));
-                                        ui.label(
-                                            RichText::new(format!(
-                                                "Current: {}",
-                                                info.current_version
-                                            ))
-                                            .size(12.0)
-                                            .color(TEXT_SECONDARY),
-                                        );
+                                        ui.label(mono_text(
+                                            format!("current: {}", info.current_version),
+                                            11.5,
+                                            TEXT_MUTED,
+                                        ));
                                         ui.with_layout(
                                             egui::Layout::right_to_left(egui::Align::Center),
                                             |ui| {
@@ -2312,12 +2257,20 @@ impl eframe::App for GeodeDeckApp {
                                         );
                                     });
                                 });
+                            let rail = egui::Rect::from_min_size(
+                                egui::pos2(banner.response.rect.left() + 1.0, banner.response.rect.top() + 6.0),
+                                Vec2::new(2.0, banner.response.rect.height() - 12.0),
+                            );
+                            ui.painter()
+                                .rect_filled(rail, Rounding::same(1.0), ACCENT_EPIC);
                             ui.add_space(12.0);
                         }
                     }
                 }
 
-                egui::ScrollArea::vertical().show(ui, |ui| match self.active_tab {
+                egui::ScrollArea::vertical()
+                    .id_salt(("tab_scroll", self.active_tab as u8))
+                    .show(ui, |ui| match self.active_tab {
                     NavTab::Home => views::home::render(self, ui),
                     NavTab::Library => views::library::render(self, ui),
                     NavTab::Mods => views::mods::render(self, ui),
@@ -2396,12 +2349,12 @@ impl eframe::App for GeodeDeckApp {
                         };
                         let frame_resp = egui::Frame::none()
                             .fill(BG_ELEVATED)
-                            .stroke(Stroke::new(1.0_f32, accent.gamma_multiply(0.45)))
+                            .stroke(Stroke::new(1.0_f32, BORDER_STRONG))
                             .rounding(Rounding::same(RADIUS_CARD))
-                            .inner_margin(Margin::same(13.0))
+                            .inner_margin(Margin::same(12.0))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    ui.label(RichText::new(icon).size(17.0).color(accent));
+                                    ui.label(RichText::new(icon).size(16.0).color(accent));
                                     ui.vertical(|ui| {
                                         ui.set_max_width(280.0);
                                         ui.label(bold_text(&toast.title, 13.0, TEXT_PRIMARY));
@@ -2433,13 +2386,13 @@ impl eframe::App for GeodeDeckApp {
                             });
                         let stripe = egui::Rect::from_min_size(
                             egui::pos2(
-                                frame_resp.response.rect.left() + 2.0,
+                                frame_resp.response.rect.left() + 1.0,
                                 frame_resp.response.rect.top() + 8.0,
                             ),
-                            Vec2::new(3.0, frame_resp.response.rect.height() - 16.0),
+                            Vec2::new(2.0, frame_resp.response.rect.height() - 16.0),
                         );
                         ui.painter()
-                            .rect_filled(stripe, Rounding::same(99.0), accent);
+                            .rect_filled(stripe, Rounding::same(1.0), accent);
                         ui.add_space(6.0);
                     }
                 });

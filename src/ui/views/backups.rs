@@ -1,4 +1,4 @@
-use eframe::egui::{self, RichText, Rounding, Stroke};
+use eframe::egui::{self, RichText, Rounding, Stroke, Vec2};
 
 use crate::backup::crypto::{dpapi_key_ready, vault_key_protection_label};
 use crate::backup::save_tools::delete_save_slot;
@@ -14,7 +14,6 @@ use crate::ui::icons::ph;
 use crate::ui::theme::*;
 
 pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
-    // Top Page Header + Primary Actions
     section_heading(
         ui,
         "Encrypted Save Vault & Backups",
@@ -89,9 +88,9 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         }
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
-    // 4-Tile KPI Summary Strip
+    // Telemetry Summary Strip
     let total_vault_bytes: u64 = app.snapshots.iter().map(|s| s.total_bytes).sum();
     let dpapi_active = dpapi_key_ready();
     let save_ok = app
@@ -99,6 +98,21 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         .as_ref()
         .is_some_and(|s| s.game_manager_valid && s.local_levels_valid);
     let levels_cnt = app.save_summary.as_ref().map_or(0, |s| s.level_count);
+    let enc_val = if app.config.backup_policy.encrypt_vault {
+        "AES-256-GCM"
+    } else {
+        "Plaintext"
+    };
+    let snap_val = format!("{} Stored", app.snapshots.len());
+    let snap_size = human_bytes(total_vault_bytes);
+    let health_val = if app.save_summary.is_none() {
+        "Inspecting..."
+    } else if save_ok {
+        "Valid XML"
+    } else {
+        "Attention"
+    };
+    let levels_sub = format!("{levels_cnt} local level(s)");
     let sched_label = if app.config.backup_policy.scheduled_interval_mins == 0 {
         "Manual Only".to_string()
     } else {
@@ -112,67 +126,35 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         app.config.backup_policy.last_backup_at.clone()
     };
 
-    ui.columns(4, |cols| {
-        stat_tile(
-            &mut cols[0],
-            ph::LOCK,
-            "ENCRYPTION",
-            if app.config.backup_policy.encrypt_vault {
-                "AES-256-GCM"
-            } else {
-                "Plaintext"
-            },
-            vault_key_protection_label(),
-            STATUS_OK,
-        );
-        stat_tile(
-            &mut cols[1],
-            ph::FILE_ARCHIVE,
-            "SNAPSHOTS",
-            &format!("{} Stored", app.snapshots.len()),
-            &human_bytes(total_vault_bytes),
-            ACCENT_EPIC_BRIGHT,
-        );
-        stat_tile(
-            &mut cols[2],
-            ph::SHIELD_CHECK,
-            "LIVE SAVE HEALTH",
-            if app.save_summary.is_none() {
-                "Inspecting..."
-            } else if save_ok {
-                "Valid XML"
-            } else {
-                "Attention"
-            },
-            &format!("{levels_cnt} local level(s)"),
-            if save_ok { STATUS_OK } else { STATUS_WARN },
-        );
-        stat_tile(
-            &mut cols[3],
-            ph::ARROWS_CLOCKWISE,
-            "AUTO-SCHEDULE",
-            &sched_label,
-            &last_backup_sub,
-            TEXT_PRIMARY,
-        );
-    });
+    telemetry_strip(
+        ui,
+        &[
+            ("ENCRYPTION", enc_val, vault_key_protection_label(), STATUS_OK),
+            ("SNAPSHOTS", &snap_val, &snap_size, ACCENT_EPIC_BRIGHT),
+            (
+                "LIVE SAVE HEALTH",
+                health_val,
+                &levels_sub,
+                if save_ok { STATUS_OK } else { STATUS_WARN },
+            ),
+            ("AUTO-SCHEDULE", &sched_label, &last_backup_sub, TEXT_PRIMARY),
+        ],
+    );
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
-    // Balanced Two-Column Policy + Live Save Integrity Row (strictly width-bounded to prevent overlap)
-    ui.spacing_mut().item_spacing.x = 14.0;
+    // Balanced Two-Column Policy + Live Save Integrity Row (width-bounded, zero nested card stacks)
+    ui.spacing_mut().item_spacing.x = 12.0;
     ui.columns(2, |cols| {
-        let col0_inner_w = (cols[0].available_width() - 42.0).max(180.0);
+        let col0_inner_w = (cols[0].available_width() - 38.0).max(180.0);
         card_frame().show(&mut cols[0], |ui| {
             ui.set_width(col0_inner_w);
             ui.set_max_width(col0_inner_w);
-            ui.set_min_height(392.0);
+            ui.set_min_height(376.0);
 
             ui.horizontal(|ui| {
-                icon_tile(ui, ph::SHIELD_CHECK, 38.0, STATUS_OK, STATUS_OK_SOFT);
-                ui.add_space(4.0);
                 ui.vertical(|ui| {
-                    ui.set_max_width((col0_inner_w - 170.0).max(100.0));
+                    ui.set_max_width((col0_inner_w - 125.0).max(100.0));
                     ui.add(
                         egui::Label::new(bold_text("Vault Policy & Scheduler", 15.0, TEXT_PRIMARY))
                             .truncate(),
@@ -199,9 +181,9 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     );
                 });
             });
-            ui.add_space(12.0);
-            ui.separator();
             ui.add_space(10.0);
+            row_divider(ui);
+            ui.add_space(8.0);
 
             let pol = &mut app.config.backup_policy;
             let mut changed = false;
@@ -209,7 +191,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             let switches = [
                 (
                     "Encrypt Snapshots",
-                    "AES-256-GCM cipher locked with Windows DPAPI master key",
+                    "AES-256-GCM cipher locked with OS key protection",
                     &mut pol.encrypt_vault,
                 ),
                 (
@@ -236,8 +218,8 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             for (title, desc, flag) in switches {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
-                        ui.set_max_width((col0_inner_w - 58.0).max(110.0));
-                        ui.label(semibold_text(title, 13.0, TEXT_PRIMARY));
+                        ui.set_max_width((col0_inner_w - 52.0).max(110.0));
+                        ui.label(semibold_text(title, 12.5, TEXT_PRIMARY));
                         ui.label(RichText::new(desc).size(11.5).color(TEXT_MUTED));
                     });
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -249,13 +231,12 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 ui.add_space(7.0);
             }
 
-            ui.separator();
-            ui.add_space(10.0);
+            row_divider(ui);
+            ui.add_space(8.0);
 
-            // Stacked Scheduler Controls (never overflows horizontally)
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.set_max_width((col0_inner_w - 150.0).max(90.0));
+                    ui.set_max_width((col0_inner_w - 146.0).max(90.0));
                     ui.label(semibold_text("Scheduled Interval", 12.5, TEXT_PRIMARY));
                     ui.label(
                         RichText::new("Periodic background save check")
@@ -265,7 +246,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     egui::ComboBox::from_id_salt("vault_interval")
-                        .width(132.0)
+                        .width(128.0)
                         .selected_text(if pol.scheduled_interval_mins == 0 {
                             "Disabled".into()
                         } else {
@@ -292,7 +273,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             ui.add_space(8.0);
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.set_max_width((col0_inner_w - 150.0).max(90.0));
+                    ui.set_max_width((col0_inner_w - 146.0).max(90.0));
                     ui.label(semibold_text("Snapshot Retention", 12.5, TEXT_PRIMARY));
                     ui.label(
                         RichText::new("Max automatic backups kept")
@@ -302,7 +283,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 });
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     egui::ComboBox::from_id_salt("vault_retention")
-                        .width(132.0)
+                        .width(128.0)
                         .selected_text(if pol.retention_count == 0 {
                             "Unlimited".into()
                         } else {
@@ -333,23 +314,15 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             }
         });
 
-        let col1_inner_w = (cols[1].available_width() - 42.0).max(180.0);
+        let col1_inner_w = (cols[1].available_width() - 38.0).max(180.0);
         card_frame().show(&mut cols[1], |ui| {
             ui.set_width(col1_inner_w);
             ui.set_max_width(col1_inner_w);
-            ui.set_min_height(392.0);
+            ui.set_min_height(376.0);
 
             ui.horizontal(|ui| {
-                icon_tile(
-                    ui,
-                    ph::KEY,
-                    38.0,
-                    ACCENT_EPIC_BRIGHT,
-                    ACCENT_EPIC_SOFT,
-                );
-                ui.add_space(4.0);
                 ui.vertical(|ui| {
-                    ui.set_max_width((col1_inner_w - 150.0).max(100.0));
+                    ui.set_max_width((col1_inner_w - 105.0).max(100.0));
                     ui.add(
                         egui::Label::new(bold_text(
                             "Live Save Integrity & Privacy",
@@ -377,74 +350,47 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     }
                 });
             });
-            ui.add_space(12.0);
-            ui.separator();
             ui.add_space(10.0);
+            row_divider(ui);
+            ui.add_space(6.0);
 
             if let Some(ref sum) = app.save_summary {
-                elevated_card_frame().show(ui, |ui| {
-                    ui.set_width((col1_inner_w - 28.0).max(140.0));
-                    ui.horizontal(|ui| {
-                        ui.label(RichText::new("Player Profile").size(12.5).color(TEXT_MUTED));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            ui.label(bold_text(&sum.player_name, 13.5, TEXT_PRIMARY));
-                        });
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new("Player Profile").size(12.5).color(TEXT_MUTED));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        ui.label(bold_text(&sum.player_name, 13.0, TEXT_PRIMARY));
                     });
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("CCGameManager.dat")
-                                .size(12.5)
-                                .color(TEXT_MUTED),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            status_dot_pill(
-                                ui,
-                                if sum.game_manager_valid {
-                                    "Valid XML Structure"
-                                } else {
-                                    "Missing or Invalid"
-                                },
-                                if sum.game_manager_valid {
-                                    STATUS_OK
-                                } else {
-                                    STATUS_ERR
-                                },
-                                if sum.game_manager_valid {
-                                    STATUS_OK_SOFT
-                                } else {
-                                    STATUS_ERR_SOFT
-                                },
-                            );
-                        });
+                });
+                row_divider(ui);
+
+                ui.horizontal(|ui| {
+                    ui.label(mono_text("CCGameManager.dat", 12.0, TEXT_SECONDARY));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (lbl, col) = if sum.game_manager_valid {
+                            ("Valid XML Structure", STATUS_OK)
+                        } else {
+                            ("Missing or Invalid", STATUS_ERR)
+                        };
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (d, _) = ui.allocate_exact_size(Vec2::splat(7.0), egui::Sense::hover());
+                        ui.painter().circle_filled(d.center(), 2.8, col);
+                        ui.label(semibold_text(lbl, 12.0, col));
                     });
-                    ui.add_space(6.0);
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new("CCLocalLevels.dat")
-                                .size(12.5)
-                                .color(TEXT_MUTED),
-                        );
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            status_dot_pill(
-                                ui,
-                                &if sum.local_levels_valid {
-                                    format!("Valid XML ({} levels)", sum.level_count)
-                                } else {
-                                    "Missing or Invalid".into()
-                                },
-                                if sum.local_levels_valid {
-                                    STATUS_OK
-                                } else {
-                                    STATUS_ERR
-                                },
-                                if sum.local_levels_valid {
-                                    STATUS_OK_SOFT
-                                } else {
-                                    STATUS_ERR_SOFT
-                                },
-                            );
-                        });
+                });
+                row_divider(ui);
+
+                ui.horizontal(|ui| {
+                    ui.label(mono_text("CCLocalLevels.dat", 12.0, TEXT_SECONDARY));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        let (lbl, col) = if sum.local_levels_valid {
+                            (format!("Valid XML ({} levels)", sum.level_count), STATUS_OK)
+                        } else {
+                            ("Missing or Invalid".into(), STATUS_ERR)
+                        };
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        let (d, _) = ui.allocate_exact_size(Vec2::splat(7.0), egui::Sense::hover());
+                        ui.painter().circle_filled(d.center(), 2.8, col);
+                        ui.label(semibold_text(&lbl, 12.0, col));
                     });
                 });
 
@@ -452,12 +398,12 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     ui.add_space(8.0);
                     egui::Frame::none()
                         .fill(STATUS_ERR_SOFT)
-                        .stroke(Stroke::new(1.0_f32, STATUS_ERR.gamma_multiply(0.45)))
+                        .stroke(Stroke::new(1.0_f32, STATUS_ERR.gamma_multiply(0.4)))
                         .rounding(Rounding::same(RADIUS_CARD))
-                        .inner_margin(egui::Margin::same(12.0))
+                        .inner_margin(egui::Margin::same(10.0))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
-                                ui.label(RichText::new(ph::WARNING).size(15.0).color(STATUS_ERR));
+                                ui.label(RichText::new(ph::WARNING).size(14.5).color(STATUS_ERR));
                                 ui.label(RichText::new(err).size(12.0).color(STATUS_ERR));
                             });
                         });
@@ -472,99 +418,97 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             }
 
             ui.add_space(10.0);
-            inset_frame().show(ui, |ui| {
-                ui.set_width((col1_inner_w - 28.0).max(140.0));
-                ui.horizontal(|ui| {
+            row_divider(ui);
+            ui.add_space(8.0);
+
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new(ph::LOCK)
+                        .size(15.0)
+                        .color(ACCENT_EPIC_BRIGHT),
+                );
+                ui.vertical(|ui| {
+                    ui.set_max_width((col1_inner_w - 30.0).max(110.0));
+                    ui.label(semibold_text("Strict Privacy Guarantee", 12.5, TEXT_PRIMARY));
                     ui.label(
-                        RichText::new(ph::LOCK)
-                            .size(16.0)
-                            .color(ACCENT_EPIC_BRIGHT),
+                        RichText::new(
+                            "GeoDeck never reads, logs, or caches GJP/GJP2 password tokens during XML inspection.",
+                        )
+                        .size(11.5)
+                        .color(TEXT_SECONDARY),
                     );
-                    ui.vertical(|ui| {
-                        ui.set_max_width((col1_inner_w - 64.0).max(110.0));
-                        ui.label(semibold_text("Strict Privacy Guarantee", 12.5, TEXT_PRIMARY));
-                        ui.label(
-                            RichText::new(
-                                "GeoDeck never reads, logs, or caches GJP/GJP2 password tokens during XML inspection.",
-                            )
-                            .size(11.5)
-                            .color(TEXT_SECONDARY),
-                        );
-                    });
                 });
             });
 
             if !app.legacy_backups.is_empty() {
                 ui.add_space(10.0);
-                elevated_card_frame().show(ui, |ui| {
-                    ui.set_width((col1_inner_w - 28.0).max(140.0));
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_max_width((col1_inner_w - 175.0).max(100.0));
-                            ui.label(bold_text(
-                                &format!(
-                                    "{} External Backup(s) Found",
-                                    app.legacy_backups.len()
-                                ),
-                                13.0,
-                                ACCENT_EPIC_BRIGHT,
-                            ));
-                            ui.label(
-                                RichText::new("Detected GeodeSync / GDLauncher save archives")
-                                    .size(11.5)
-                                    .color(TEXT_SECONDARY),
-                            );
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(epic_secondary_button(
-                                    ph::DOWNLOAD_SIMPLE,
-                                    "Migrate Latest",
-                                ))
-                                .on_hover_text("Encrypt and import the newest external backup")
-                                .clicked()
-                            {
-                                if let Some((lbl, path)) = app.legacy_backups.first().cloned() {
-                                    match import_backup_folder_into_vault(
-                                        &path,
-                                        std::path::Path::new(&app.config.backup_dir),
-                                        &lbl,
-                                    ) {
-                                        Ok(s) => {
-                                            app.push_toast(
-                                                crate::core::worker::ToastKind::Success,
-                                                "Legacy Backup Migrated",
-                                                format!("Encrypted {} into {}", lbl, s.id),
-                                            );
-                                            app.refresh_backups_async();
-                                        }
-                                        Err(e) => app.push_toast(
-                                            crate::core::worker::ToastKind::Error,
-                                            "Migration Failed",
-                                            e,
-                                        ),
+                row_divider(ui);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_max_width((col1_inner_w - 142.0).max(100.0));
+                        ui.label(bold_text(
+                            &format!(
+                                "{} External Backup(s) Found",
+                                app.legacy_backups.len()
+                            ),
+                            13.0,
+                            ACCENT_EPIC_BRIGHT,
+                        ));
+                        ui.label(
+                            RichText::new("Detected GeodeSync / GDLauncher save archives")
+                                .size(11.5)
+                                .color(TEXT_MUTED),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(epic_secondary_button(
+                                ph::DOWNLOAD_SIMPLE,
+                                "Migrate Latest",
+                            ))
+                            .on_hover_text("Encrypt and import the newest external backup")
+                            .clicked()
+                        {
+                            if let Some((lbl, path)) = app.legacy_backups.first().cloned() {
+                                match import_backup_folder_into_vault(
+                                    &path,
+                                    std::path::Path::new(&app.config.backup_dir),
+                                    &lbl,
+                                ) {
+                                    Ok(s) => {
+                                        app.push_toast(
+                                            crate::core::worker::ToastKind::Success,
+                                            "Legacy Backup Migrated",
+                                            format!("Encrypted {} into {}", lbl, s.id),
+                                        );
+                                        app.refresh_backups_async();
                                     }
+                                    Err(e) => app.push_toast(
+                                        crate::core::worker::ToastKind::Error,
+                                        "Migration Failed",
+                                        e,
+                                    ),
                                 }
                             }
-                        });
+                        }
                     });
                 });
             }
         });
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
     // Vault Snapshots Panel
     card_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
-            ui.label(bold_text("Vault Snapshots", 16.0, TEXT_PRIMARY));
-            badge_pill(
-                ui,
-                &format!("{} total", app.snapshots.len()),
-                ACCENT_EPIC_BRIGHT,
-                ACCENT_EPIC_SOFT,
-            );
+            ui.label(bold_text("Vault Snapshots", 15.5, TEXT_PRIMARY));
+            ui.label(mono_text(
+                format!("{} total", app.snapshots.len()),
+                11.5,
+                TEXT_MUTED,
+            ));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
                     .add(epic_secondary_button(ph::ARROWS_CLOCKWISE, "Refresh"))
@@ -574,7 +518,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 }
             });
         });
-        ui.add_space(10.0);
+        ui.add_space(8.0);
 
         if app.snapshots.is_empty() {
             empty_state_card(
@@ -587,11 +531,12 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         }
 
         let snapshots = app.snapshots.clone();
+        let len = snapshots.len();
         egui::ScrollArea::vertical()
             .max_height(340.0)
             .show(ui, |ui| {
-                for snap in snapshots {
-                    let frame_resp = elevated_card_frame().show(ui, |ui| {
+                for (idx, snap) in snapshots.into_iter().enumerate() {
+                    hover_row(ui, egui::Sense::hover(), |ui| {
                         ui.horizontal(|ui| {
                             icon_tile(
                                 ui,
@@ -600,7 +545,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                 } else {
                                     ph::FILE_ARCHIVE
                                 },
-                                40.0,
+                                36.0,
                                 if snap.encrypted {
                                     STATUS_OK
                                 } else {
@@ -615,9 +560,9 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             ui.add_space(6.0);
 
                             ui.vertical(|ui| {
-                                ui.set_width((ui.available_width() - 320.0).max(160.0));
+                                ui.set_width((ui.available_width() - 310.0).max(160.0));
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label(bold_text(&snap.created_at, 14.0, TEXT_PRIMARY));
+                                    ui.label(bold_text(&snap.created_at, 13.5, TEXT_PRIMARY));
                                     badge_pill(
                                         ui,
                                         if snap.encrypted { "AES-256-GCM" } else { "PLAIN" },
@@ -629,28 +574,29 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                         },
                                     );
                                     if snap.xml_verified {
-                                        badge_pill(
-                                            ui,
+                                        ui.label(mono_text(
                                             "XML Verified",
-                                            ACCENT_EPIC_BRIGHT,
-                                            ACCENT_EPIC_SOFT,
-                                        );
+                                            11.0,
+                                            TEXT_SECONDARY,
+                                        ));
                                     }
                                     if snap.includes_geode_configs {
-                                        badge_pill(ui, "+Configs", TEXT_SECONDARY, BG_SURFACE);
+                                        ui.label(mono_text("+Configs", 11.0, TEXT_MUTED));
                                     }
                                 });
                                 ui.add(
                                     egui::Label::new(
-                                        RichText::new(format!(
-                                            "{}  ·  {} file(s)  ·  {}  ·  {}",
-                                            snap.trigger_reason,
-                                            snap.file_count,
-                                            human_bytes(snap.total_bytes),
-                                            snap.id
-                                        ))
-                                        .size(11.5)
-                                        .color(TEXT_MUTED),
+                                        mono_text(
+                                            format!(
+                                                "{}  ·  {} file(s)  ·  {}  ·  {}",
+                                                snap.trigger_reason,
+                                                snap.file_count,
+                                                human_bytes(snap.total_bytes),
+                                                snap.id
+                                            ),
+                                            11.0,
+                                            TEXT_MUTED,
+                                        ),
                                     )
                                     .truncate(),
                                 );
@@ -729,15 +675,9 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             );
                         });
                     });
-
-                    if frame_resp.response.hovered() {
-                        ui.painter().rect_stroke(
-                            frame_resp.response.rect,
-                            Rounding::same(RADIUS_CARD),
-                            Stroke::new(1.0_f32, BORDER_STRONG),
-                        );
+                    if idx + 1 < len {
+                        row_divider(ui);
                     }
-                    ui.add_space(6.0);
                 }
             });
     });
@@ -758,17 +698,17 @@ fn render_backup_modals(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         icon_tile(
                             ui,
                             ph::ARROW_COUNTER_CLOCKWISE,
-                            38.0,
+                            36.0,
                             ACCENT_EPIC_BRIGHT,
                             ACCENT_EPIC_SOFT,
                         );
                         ui.vertical(|ui| {
-                            ui.label(bold_text("Confirm Safe Save Restoration", 16.0, TEXT_PRIMARY));
-                            ui.label(
-                                RichText::new(format!("{}  ·  {}", snap.created_at, snap.id))
-                                    .size(12.0)
-                                    .color(TEXT_MUTED),
-                            );
+                            ui.label(bold_text("Confirm Safe Save Restoration", 15.5, TEXT_PRIMARY));
+                            ui.label(mono_text(
+                                format!("{}  ·  {}", snap.created_at, snap.id),
+                                11.5,
+                                TEXT_MUTED,
+                            ));
                         });
                     });
                     ui.add_space(12.0);
@@ -806,7 +746,6 @@ fn render_backup_modals(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             });
     }
 
-    // === Delete Snapshot Confirmation Modal Dialog ===
     if let Some(snap) = app.ui_state.pending_delete_snapshot.clone() {
         modal_backdrop(ui.ctx(), "delete_snap_modal_bg");
         egui::Area::new(egui::Id::new("delete_snap_modal_fg"))
@@ -816,14 +755,14 @@ fn render_backup_modals(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 dialog_frame().show(ui, |ui| {
                     ui.set_max_width(420.0);
                     ui.horizontal(|ui| {
-                        icon_tile(ui, ph::TRASH, 38.0, STATUS_ERR, STATUS_ERR_SOFT);
+                        icon_tile(ui, ph::TRASH, 36.0, STATUS_ERR, STATUS_ERR_SOFT);
                         ui.vertical(|ui| {
-                            ui.label(bold_text("Delete Vault Snapshot?", 16.0, TEXT_PRIMARY));
-                            ui.label(
-                                RichText::new(format!("{}  ·  {}", snap.created_at, snap.id))
-                                    .size(12.0)
-                                    .color(TEXT_MUTED),
-                            );
+                            ui.label(bold_text("Delete Vault Snapshot?", 15.5, TEXT_PRIMARY));
+                            ui.label(mono_text(
+                                format!("{}  ·  {}", snap.created_at, snap.id),
+                                11.5,
+                                TEXT_MUTED,
+                            ));
                         });
                     });
                     ui.add_space(12.0);
@@ -860,14 +799,14 @@ fn render_backup_modals(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 }
 
 fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
-    ui.spacing_mut().item_spacing.x = 14.0;
+    ui.spacing_mut().item_spacing.x = 12.0;
     ui.columns(2, |cols| {
-        let col0_w = (cols[0].available_width() - 42.0).max(180.0);
+        let col0_w = (cols[0].available_width() - 38.0).max(180.0);
         card_frame().show(&mut cols[0], |ui| {
             ui.set_width(col0_w);
             ui.set_max_width(col0_w);
             ui.set_min_height(380.0);
-            ui.label(bold_text("Save Slots (Multi-Profile)", 15.5, TEXT_PRIMARY));
+            ui.label(bold_text("Save Slots (Multi-Profile)", 15.0, TEXT_PRIMARY));
             ui.label(
                 RichText::new("Switch cleanly between main, challenge, or creator save states.")
                     .size(12.0)
@@ -879,7 +818,7 @@ fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     ui,
                     &mut app.ui_state.new_save_slot_name,
                     "New Slot Name...",
-                    (col0_w - 150.0).max(120.0),
+                    (col0_w - 140.0).max(120.0),
                 );
                 if ui
                     .add(epic_cta_button(ph::PLUS, "Create Slot"))
@@ -898,20 +837,23 @@ fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     "Enter a slot name above to snapshot your current save into a switchable profile.",
                 );
             } else {
-                for slot in app.save_slots.clone() {
-                    elevated_card_frame().show(ui, |ui| {
-                        ui.set_width((col0_w - 28.0).max(140.0));
+                let slots = app.save_slots.clone();
+                let len = slots.len();
+                for (idx, slot) in slots.into_iter().enumerate() {
+                    hover_row(ui, egui::Sense::hover(), |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
-                                ui.set_max_width((col0_w - 190.0).max(100.0));
+                                ui.set_max_width((col0_w - 170.0).max(100.0));
                                 ui.label(bold_text(&slot.name, 13.5, TEXT_PRIMARY));
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{}  ·  {}★  ·  {} Demons",
-                                        slot.player_name, slot.stars, slot.demons
-                                    ))
-                                    .size(11.5)
-                                    .color(TEXT_MUTED),
+                                    mono_text(
+                                        format!(
+                                            "{}  ·  {}★  ·  {} Demons",
+                                            slot.player_name, slot.stars, slot.demons
+                                        ),
+                                        11.0,
+                                        TEXT_MUTED,
+                                    ),
                                 );
                             });
                             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -941,20 +883,22 @@ fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             });
                         });
                     });
-                    ui.add_space(6.0);
+                    if idx + 1 < len {
+                        row_divider(ui);
+                    }
                 }
             }
         });
 
-        let col1_w = (cols[1].available_width() - 42.0).max(180.0);
+        let col1_w = (cols[1].available_width() - 38.0).max(180.0);
         card_frame().show(&mut cols[1], |ui| {
             ui.set_width(col1_w);
             ui.set_max_width(col1_w);
             ui.set_min_height(380.0);
             ui.horizontal(|ui| {
                 ui.vertical(|ui| {
-                    ui.set_max_width((col1_w - 130.0).max(110.0));
-                    ui.label(bold_text("Save Doctor & Salvage", 15.5, TEXT_PRIMARY));
+                    ui.set_max_width((col1_w - 110.0).max(110.0));
+                    ui.label(bold_text("Save Doctor & Salvage", 15.0, TEXT_PRIMARY));
                     ui.label(
                         RichText::new("Auto-discover valid CCGameManager backups & resurrect corrupted saves.")
                             .size(11.5)
@@ -980,15 +924,16 @@ fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     "Decoded CCGameManager*.dat and .bak candidates will appear here.",
                 );
             } else {
+                let cands = app.salvage_candidates.clone();
+                let len = cands.len();
                 egui::ScrollArea::vertical()
                     .max_height(320.0)
                     .show(ui, |ui| {
-                        for cand in app.salvage_candidates.clone() {
-                            elevated_card_frame().show(ui, |ui| {
-                                ui.set_width((col1_w - 34.0).max(140.0));
+                        for (idx, cand) in cands.into_iter().enumerate() {
+                            hover_row(ui, egui::Sense::hover(), |ui| {
                                 ui.horizontal(|ui| {
                                     ui.vertical(|ui| {
-                                        ui.set_max_width((col1_w - 160.0).max(100.0));
+                                        ui.set_max_width((col1_w - 140.0).max(100.0));
                                         ui.add(
                                             egui::Label::new(bold_text(
                                                 &cand.relative_path,
@@ -998,15 +943,17 @@ fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                             .truncate(),
                                         );
                                         ui.label(
-                                            RichText::new(format!(
-                                                "{} · {}★ · {} · {}",
-                                                cand.player_name,
-                                                cand.stars,
-                                                human_bytes(cand.size_bytes),
-                                                cand.modified_str
-                                            ))
-                                            .size(11.0)
-                                            .color(TEXT_MUTED),
+                                            mono_text(
+                                                format!(
+                                                    "{} · {}★ · {} · {}",
+                                                    cand.player_name,
+                                                    cand.stars,
+                                                    human_bytes(cand.size_bytes),
+                                                    cand.modified_str
+                                                ),
+                                                11.0,
+                                                TEXT_MUTED,
+                                            ),
                                         );
                                     });
                                     ui.with_layout(
@@ -1025,7 +972,9 @@ fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                     );
                                 });
                             });
-                            ui.add_space(5.0);
+                            if idx + 1 < len {
+                                row_divider(ui);
+                            }
                         }
                     });
             }
@@ -1034,14 +983,14 @@ fn render_slots_and_salvage(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 }
 
 fn render_compactor_and_bundles(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
-    ui.spacing_mut().item_spacing.x = 14.0;
+    ui.spacing_mut().item_spacing.x = 12.0;
     ui.columns(2, |cols| {
-        let col0_w = (cols[0].available_width() - 42.0).max(180.0);
+        let col0_w = (cols[0].available_width() - 38.0).max(180.0);
         card_frame().show(&mut cols[0], |ui| {
             ui.set_width(col0_w);
             ui.set_max_width(col0_w);
             ui.set_min_height(310.0);
-            ui.label(bold_text("Save Bloat Compactor", 15.5, TEXT_PRIMARY));
+            ui.label(bold_text("Save Bloat Compactor", 15.0, TEXT_PRIMARY));
             ui.label(
                 RichText::new("Purge cached online level data from CCLocalLevels.dat while keeping every editor level you built.")
                     .size(12.0)
@@ -1049,41 +998,28 @@ fn render_compactor_and_bundles(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             );
             ui.add_space(12.0);
             if let Some(ref b) = app.save_bloat {
-                elevated_card_frame().show(ui, |ui| {
-                    ui.set_width((col0_w - 28.0).max(140.0));
+                inset_frame().show(ui, |ui| {
+                    ui.set_width((col0_w - 24.0).max(140.0));
                     ui.label(bold_text(
                         &format!("CCLocalLevels.dat: {}", human_bytes(b.file_size_bytes)),
-                        14.0,
+                        13.5,
                         TEXT_PRIMARY,
                     ));
                     ui.add_space(4.0);
                     ui.horizontal_wrapped(|ui| {
-                        badge_pill(
-                            ui,
-                            &format!("{} Total Entries", b.total_levels),
-                            TEXT_PRIMARY,
-                            BG_SURFACE,
-                        );
-                        badge_pill(
-                            ui,
-                            &format!("{} User Created", b.user_created),
-                            STATUS_OK,
-                            STATUS_OK_SOFT,
-                        );
-                        badge_pill(
-                            ui,
-                            &format!("{} Cached Online Bloat", b.online_cached),
-                            if b.online_cached > 0 {
-                                STATUS_WARN
-                            } else {
-                                TEXT_MUTED
-                            },
-                            if b.online_cached > 0 {
-                                STATUS_WARN_SOFT
-                            } else {
-                                BG_SURFACE
-                            },
-                        );
+                        ui.label(mono_text(
+                            format!("{} total  ·  {} user-created", b.total_levels, b.user_created),
+                            11.5,
+                            TEXT_SECONDARY,
+                        ));
+                        if b.online_cached > 0 {
+                            badge_pill(
+                                ui,
+                                &format!("{} Cached Bloat", b.online_cached),
+                                STATUS_WARN,
+                                STATUS_WARN_SOFT,
+                            );
+                        }
                     });
                 });
             } else {
@@ -1112,12 +1048,12 @@ fn render_compactor_and_bundles(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             });
         });
 
-        let col1_w = (cols[1].available_width() - 42.0).max(180.0);
+        let col1_w = (cols[1].available_width() - 38.0).max(180.0);
         card_frame().show(&mut cols[1], |ui| {
             ui.set_width(col1_w);
             ui.set_max_width(col1_w);
             ui.set_min_height(310.0);
-            ui.label(bold_text("Portable .geodesync Bundles", 15.5, TEXT_PRIMARY));
+            ui.label(bold_text("Portable .geodesync Bundles", 15.0, TEXT_PRIMARY));
             ui.label(
                 RichText::new("Transfer or restore complete setups (.dat saves, .geode mods, and mod configs) in one file.")
                     .size(12.0)

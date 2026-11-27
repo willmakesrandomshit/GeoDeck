@@ -1,4 +1,4 @@
-use eframe::egui::{self, RichText, Rounding, Stroke, Vec2};
+use eframe::egui::{self, RichText, Vec2};
 
 use crate::core::config::LaunchMode;
 use crate::core::logging;
@@ -20,47 +20,37 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     card_frame().show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
             if let Some(ref icon) = app.brand_icon {
-                egui::Frame::none()
-                    .fill(BG_ELEVATED)
-                    .stroke(Stroke::new(1.0_f32, BORDER_STRONG))
-                    .rounding(Rounding::same(RADIUS_CARD))
-                    .inner_margin(egui::Margin::same(10.0))
-                    .show(ui, |ui| {
-                        ui.add(
-                            egui::Image::new(icon)
-                                .fit_to_exact_size(Vec2::splat(52.0))
-                                .rounding(RADIUS_ICON),
-                        );
-                    });
+                ui.add(
+                    egui::Image::new(icon)
+                        .fit_to_exact_size(Vec2::splat(48.0))
+                        .rounding(RADIUS_ICON),
+                );
             }
-            ui.add_space(6.0);
+            ui.add_space(8.0);
             ui.vertical(|ui| {
-                ui.set_max_width((ui.available_width() - 220.0).max(220.0));
+                ui.set_max_width((ui.available_width() - 210.0).max(220.0));
                 if let Some(ref lockup) = app.brand_lockup {
-                    ui.add(egui::Image::new(lockup).fit_to_exact_size(Vec2::new(160.0, 56.0)));
+                    ui.add(egui::Image::new(lockup).fit_to_exact_size(Vec2::new(148.0, 52.0)));
                 } else {
-                    ui.label(bold_text("GeoDeck", 18.0, TEXT_PRIMARY));
+                    ui.label(display_text("GeoDeck", 18.0, TEXT_PRIMARY));
                 }
                 ui.add_space(4.0);
                 ui.label(
                     RichText::new(
-                        "All-in-one Geometry Dash Launcher, Version Slot Manager, Geode Mod Studio, and Encrypted Backup Vault.",
+                        "Geometry Dash Launcher, Version Slot Manager, Geode Mod Studio, and Encrypted Save Vault.",
                     )
                     .size(12.5)
                     .color(TEXT_SECONDARY),
                 );
-                ui.add_space(8.0);
-                ui.horizontal_wrapped(|ui| {
-                    badge_pill(
-                        ui,
-                        current_app_display_version(),
-                        ACCENT_EPIC_BRIGHT,
-                        ACCENT_EPIC_SOFT,
-                    );
-                    badge_pill(ui, "Max Performance (Auto)", ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
-                    badge_pill(ui, "AES-256-GCM + DPAPI", STATUS_OK, STATUS_OK_SOFT);
-                    badge_pill(ui, "Offline-First NONG Cache", TEXT_PRIMARY, BG_ELEVATED);
-                });
+                ui.add_space(6.0);
+                ui.label(mono_text(
+                    format!(
+                        "{}  ·  AES-256-GCM + DPAPI  ·  Auto Max Performance  ·  Offline NONG Cache",
+                        current_app_display_version()
+                    ),
+                    11.0,
+                    TEXT_MUTED,
+                ));
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 if ui
@@ -73,31 +63,19 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         });
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
     // === Launch Flags & Directories ===
     card_frame().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            icon_tile(
-                ui,
-                ph::GEAR_SIX,
-                38.0,
-                ACCENT_EPIC_BRIGHT,
-                ACCENT_EPIC_SOFT,
-            );
-            ui.add_space(4.0);
-            ui.vertical(|ui| {
-                ui.label(bold_text("Launch Flags & Directories", 15.5, TEXT_PRIMARY));
-                ui.label(
-                    RichText::new("Customize Geode CLI flags, storage paths, and crash privacy")
-                        .size(12.0)
-                        .color(TEXT_SECONDARY),
-                );
-            });
-        });
-        ui.add_space(12.0);
-        ui.separator();
+        ui.label(bold_text("Launch Flags & Directories", 15.5, TEXT_PRIMARY));
+        ui.label(
+            RichText::new("Customize Geode CLI flags, storage paths, and crash privacy")
+                .size(12.0)
+                .color(TEXT_SECONDARY),
+        );
         ui.add_space(10.0);
+        row_divider(ui);
+        ui.add_space(8.0);
 
         let mut changed = false;
 
@@ -122,7 +100,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         });
 
         ui.add_space(10.0);
-        ui.label(bold_text("Native Geode Flags", 13.5, TEXT_PRIMARY));
+        ui.label(bold_text("Native Geode Flags", 13.0, TEXT_PRIMARY));
         ui.add_space(6.0);
         for (lbl, flag) in [
             (
@@ -175,20 +153,19 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         ui.add_space(8.0);
         inset_frame().show(ui, |ui| {
             ui.set_min_width(ui.available_width());
-            ui.label(
-                RichText::new(format!(
+            ui.label(mono_text(
+                format!(
                     "Command Preview: GeometryDash.exe {}",
                     preview_args.join(" ")
-                ))
-                .size(11.5)
-                .monospace()
-                .color(TEXT_SECONDARY),
-            );
+                ),
+                11.5,
+                TEXT_SECONDARY,
+            ));
         });
 
-        ui.add_space(12.0);
-        ui.separator();
         ui.add_space(10.0);
+        row_divider(ui);
+        ui.add_space(8.0);
 
         for (label, field) in [
             ("Backups Vault Dir", 0usize),
@@ -275,52 +252,45 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         }
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
     // === Keyboard Shortcuts Reference ===
     card_frame().show(ui, |ui| {
-        ui.label(bold_text("Keyboard Shortcuts", 15.5, TEXT_PRIMARY));
-        ui.add_space(6.0);
+        ui.label(bold_text("Keyboard Shortcuts", 15.0, TEXT_PRIMARY));
+        ui.add_space(8.0);
         ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x = 16.0;
             for (key, desc) in [
                 ("Ctrl+1..7", "Switch Sidebar Tab"),
                 ("Ctrl+F", "Focus Search Bar"),
                 ("Ctrl+H", "Run 8-Point Health Check"),
                 ("F5", "Refresh Workspace"),
             ] {
-                badge_pill(ui, &format!("{key} · {desc}"), TEXT_PRIMARY, BG_ELEVATED);
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = 6.0;
+                    badge_pill(ui, key, TEXT_PRIMARY, BG_ELEVATED);
+                    ui.label(RichText::new(desc).size(12.0).color(TEXT_SECONDARY));
+                });
             }
         });
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
     // === Updater ===
     card_frame().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            icon_tile(
-                ui,
-                ph::CLOUD_ARROW_DOWN,
-                38.0,
-                ACCENT_EPIC_BRIGHT,
-                ACCENT_EPIC_SOFT,
-            );
-            ui.add_space(4.0);
-            ui.vertical(|ui| {
-                ui.label(bold_text(
-                    &format!("GeoDeck Updater ({})", current_app_display_version()),
-                    15.5,
-                    TEXT_PRIMARY,
-                ));
-                ui.label(
-                    RichText::new(
-                        "Automatically checks GitHub Releases on every launch with SHA-256 verification",
-                    )
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
-                );
-            });
-        });
+        ui.label(bold_text(
+            &format!("GeoDeck Updater ({})", current_app_display_version()),
+            15.5,
+            TEXT_PRIMARY,
+        ));
+        ui.label(
+            RichText::new(
+                "Automatically checks GitHub Releases on every launch with SHA-256 verification",
+            )
+            .size(12.0)
+            .color(TEXT_SECONDARY),
+        );
         ui.add_space(10.0);
         ui.horizontal_wrapped(|ui| {
             ui.label(semibold_text("GitHub Repo:", 12.5, TEXT_SECONDARY));
@@ -357,51 +327,54 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 
         if let Some(res) = app.app_update_result.clone() {
             ui.add_space(10.0);
-            elevated_card_frame().show(ui, |ui| match res {
+            row_divider(ui);
+            ui.add_space(6.0);
+            match res {
                 Ok(info) => {
-                    ui.label(bold_text(
-                        &if info.update_available {
-                            format!(
-                                "Update available: {} -> {}",
-                                info.current_version, info.latest_version
-                            )
-                        } else {
-                            format!("Up to date ({})", info.current_version)
-                        },
-                        13.5,
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label(bold_text(
+                            &if info.update_available {
+                                format!(
+                                    "Update available: {} -> {}",
+                                    info.current_version, info.latest_version
+                                )
+                            } else {
+                                format!("Up to date ({})", info.current_version)
+                            },
+                            13.0,
+                            if info.update_available {
+                                STATUS_OK
+                            } else {
+                                TEXT_PRIMARY
+                            },
+                        ));
                         if info.update_available {
-                            STATUS_OK
-                        } else {
-                            TEXT_PRIMARY
-                        },
-                    ));
-                    if info.update_available {
-                        if let (Some(url), Some(name)) = (&info.asset_url, &info.asset_name) {
-                            ui.add_space(6.0);
-                            if ui
-                                .add(epic_cta_button(
-                                    ph::DOWNLOAD_SIMPLE,
-                                    &format!("Download {name}"),
-                                ))
-                                .clicked()
-                            {
-                                app.download_app_update_async(
-                                    url.clone(),
-                                    name.clone(),
-                                    info.expected_sha256.clone(),
-                                );
+                            if let (Some(url), Some(name)) = (&info.asset_url, &info.asset_name) {
+                                if ui
+                                    .add(epic_cta_button(
+                                        ph::DOWNLOAD_SIMPLE,
+                                        &format!("Download {name}"),
+                                    ))
+                                    .clicked()
+                                {
+                                    app.download_app_update_async(
+                                        url.clone(),
+                                        name.clone(),
+                                        info.expected_sha256.clone(),
+                                    );
+                                }
                             }
                         }
-                    }
+                    });
                 }
                 Err(e) => {
                     ui.label(RichText::new(e).size(12.0).color(STATUS_WARN));
                 }
-            });
+            }
         }
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
     // === Diagnostic Log Console ===
     card_frame().show(ui, |ui| {
@@ -411,37 +384,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 .into_iter()
                 .enumerate()
             {
-                let selected = app.ui_state.log_level_filter == idx;
-                let resp = egui::Frame::none()
-                    .fill(if selected {
-                        ACCENT_EPIC_SOFT
-                    } else {
-                        BG_ELEVATED
-                    })
-                    .stroke(Stroke::new(
-                        1.0_f32,
-                        if selected {
-                            ACCENT_EPIC
-                        } else {
-                            BORDER_SUBTLE
-                        },
-                    ))
-                    .rounding(Rounding::same(RADIUS_PILL))
-                    .inner_margin(egui::Margin::symmetric(10.0, 4.0))
-                    .show(ui, |ui| {
-                        ui.label(semibold_text(
-                            lbl,
-                            11.5,
-                            if selected {
-                                ACCENT_EPIC_BRIGHT
-                            } else {
-                                TEXT_SECONDARY
-                            },
-                        ));
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-                if resp.clicked() {
+                if filter_chip(ui, lbl, app.ui_state.log_level_filter == idx) {
                     app.ui_state.log_level_filter = idx;
                 }
             }
@@ -494,18 +437,17 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                 logging::LogLevel::Error => STATUS_ERR,
                                 logging::LogLevel::Info => TEXT_SECONDARY,
                             };
-                            ui.label(
-                                RichText::new(format!(
+                            ui.label(mono_text(
+                                format!(
                                     "[{}] [{}] [{}] {}",
                                     item.timestamp,
                                     item.level.tag(),
                                     item.category,
                                     item.message
-                                ))
-                                .size(11.5)
-                                .monospace()
-                                .color(col),
-                            );
+                                ),
+                                11.5,
+                                col,
+                            ));
                         }
                     }
                 });

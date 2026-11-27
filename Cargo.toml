@@ -1,6 +1,6 @@
 [package]
 name = "geodedeck"
-version = "1.0.0-alpha.0"
+version = "1.0.0"
 edition = "2021"
 description = "All-in-one Geometry Dash Launcher, Version Slot Manager, Performance Optimizer, Geode Mod Manager, and Encrypted Backup Platform"
 

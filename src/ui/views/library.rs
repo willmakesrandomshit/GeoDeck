@@ -1,4 +1,4 @@
-use eframe::egui::{self, RichText, Rounding, Stroke};
+use eframe::egui::{self, RichText};
 
 use crate::core::config::{GameInstallation, InstallationKind};
 use crate::core::platform::open_in_file_manager;
@@ -14,7 +14,7 @@ use crate::ui::theme::*;
 pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     ui.horizontal_wrapped(|ui| {
         ui.vertical(|ui| {
-            ui.label(bold_text("Installations & Version Slots", 22.0, TEXT_PRIMARY));
+            ui.label(display_text("Installations & Version Slots", 22.0, TEXT_PRIMARY));
             ui.label(
                 RichText::new(
                     "Manage isolated Geometry Dash versions, pin mod profiles, and verify game binaries.",
@@ -83,7 +83,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         });
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
     let active_id = app.config.active_installation_id.clone();
     let mut installs = app.config.installations.clone();
@@ -100,19 +100,20 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 "Click 'Add Install Folder' above to point GeoDeck to your Geometry Dash directory.",
             );
         } else {
-            for install in &installs {
+            let len = installs.len();
+            for (idx, install) in installs.iter().enumerate() {
                 let active = install.id == active_id;
-                let frame_resp = elevated_card_frame().show(ui, |ui| {
+                hover_row(ui, egui::Sense::hover(), |ui| {
                     ui.horizontal(|ui| {
                         icon_tile(
                             ui,
                             ph::GAME_CONTROLLER,
-                            42.0,
-                            if active { STATUS_OK } else { ACCENT_EPIC_BRIGHT },
+                            38.0,
+                            if active { STATUS_OK } else { TEXT_SECONDARY },
                             if active {
                                 STATUS_OK_SOFT
                             } else {
-                                ACCENT_EPIC_SOFT
+                                BG_ELEVATED
                             },
                         );
                         ui.add_space(6.0);
@@ -121,13 +122,13 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             ui.set_width((ui.available_width() - 220.0).max(160.0));
                             ui.horizontal_wrapped(|ui| {
                                 ui.add(
-                                    egui::Label::new(bold_text(&install.name, 14.5, TEXT_PRIMARY))
+                                    egui::Label::new(bold_text(&install.name, 14.0, TEXT_PRIMARY))
                                         .truncate(),
                                 );
                                 if active {
                                     status_dot_pill(ui, "Active", STATUS_OK, STATUS_OK_SOFT);
                                 }
-                                badge_pill(ui, install.kind.label(), TEXT_SECONDARY, BG_SURFACE);
+                                ui.label(mono_text(install.kind.label(), 11.0, TEXT_MUTED));
                             });
                             let version = install.detected_gd_version.as_deref().unwrap_or("Unknown");
                             let geode = install
@@ -136,12 +137,11 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                 .map_or_else(|| "Geode not detected".into(), |v| format!("Geode {v}"));
                             ui.add(
                                 egui::Label::new(
-                                    RichText::new(format!(
-                                        "GD {version}  ·  {geode}  ·  {}",
-                                        install.path
-                                    ))
-                                    .size(11.5)
-                                    .color(TEXT_MUTED),
+                                    mono_text(
+                                        format!("GD {version}  ·  {geode}  ·  {}", install.path),
+                                        11.0,
+                                        TEXT_MUTED,
+                                    ),
                                 )
                                 .truncate(),
                             );
@@ -150,7 +150,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             ui.spacing_mut().item_spacing.x = 6.0;
                             ui.menu_button(
-                                RichText::new("Options").size(12.5).color(TEXT_PRIMARY),
+                                RichText::new("Options").size(12.0).color(TEXT_PRIMARY),
                                 |ui| {
                                     if ui.button("Open Folder").clicked() {
                                         open_in_file_manager(std::path::Path::new(&install.path));
@@ -211,14 +211,9 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         });
                     });
                 });
-                if frame_resp.response.hovered() {
-                    ui.painter().rect_stroke(
-                        frame_resp.response.rect,
-                        Rounding::same(RADIUS_CARD),
-                        Stroke::new(1.0_f32, BORDER_STRONG),
-                    );
+                if idx + 1 < len {
+                    row_divider(ui);
                 }
-                ui.add_space(6.0);
             }
         }
     });
@@ -234,7 +229,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     }
 
     if !app.discovered_installs.is_empty() {
-        ui.add_space(14.0);
+        ui.add_space(12.0);
         card_frame().show(ui, |ui| {
             ui.label(bold_text(
                 &format!("Discovered GD Installations ({})", app.discovered_installs.len()),
@@ -242,22 +237,27 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 TEXT_PRIMARY,
             ));
             ui.add_space(6.0);
-            for disc in app.discovered_installs.clone() {
+            let disc_list = app.discovered_installs.clone();
+            let len = disc_list.len();
+            for (idx, disc) in disc_list.into_iter().enumerate() {
                 let already = app
                     .config
                     .installations
                     .iter()
                     .any(|i| i.path.eq_ignore_ascii_case(&disc.path));
-                elevated_card_frame().show(ui, |ui| {
+                hover_row(ui, egui::Sense::hover(), |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.set_width((ui.available_width() - 150.0).max(160.0));
                             ui.horizontal_wrapped(|ui| {
                                 ui.label(bold_text(&disc.name, 13.5, TEXT_PRIMARY));
-                                badge_pill(ui, &disc.source, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
-                                badge_pill(ui, &format!("GD {}", disc.version), TEXT_SECONDARY, BG_SURFACE);
+                                ui.label(mono_text(
+                                    format!("{}  ·  GD {}", disc.source, disc.version),
+                                    11.0,
+                                    TEXT_MUTED,
+                                ));
                             });
-                            ui.label(RichText::new(&disc.path).size(11.5).color(TEXT_MUTED));
+                            ui.label(mono_text(&disc.path, 11.0, TEXT_MUTED));
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if already {
@@ -282,14 +282,16 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         });
                     });
                 });
-                ui.add_space(4.0);
+                if idx + 1 < len {
+                    row_divider(ui);
+                }
             }
         });
     }
 
-    ui.add_space(16.0);
-    ui.label(bold_text("Advanced Install Tools", 16.0, TEXT_PRIMARY));
-    ui.add_space(8.0);
+    ui.add_space(14.0);
+    ui.label(bold_text("Advanced Install Tools", 15.5, TEXT_PRIMARY));
+    ui.add_space(6.0);
 
     epic_subtab_bar(
         ui,
@@ -342,42 +344,44 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 inset_frame().show(ui, |ui| {
                     ui.set_min_width(ui.available_width());
                     ui.label(
-                        RichText::new(format!(
-                            "Checked {}  ·  {} healthy  ·  {} missing  ·  {} changed",
-                            app.integrity_report.checked_at,
-                            app.integrity_report.healthy_count,
-                            app.integrity_report.missing_count,
-                            app.integrity_report.corrupted_count
-                        ))
-                        .size(12.5)
-                        .color(if app.integrity_report.overall_ok {
-                            STATUS_OK
-                        } else {
-                            STATUS_WARN
-                        }),
+                        mono_text(
+                            format!(
+                                "Checked {}  ·  {} healthy  ·  {} missing  ·  {} changed",
+                                app.integrity_report.checked_at,
+                                app.integrity_report.healthy_count,
+                                app.integrity_report.missing_count,
+                                app.integrity_report.corrupted_count
+                            ),
+                            12.0,
+                            if app.integrity_report.overall_ok {
+                                STATUS_OK
+                            } else {
+                                STATUS_WARN
+                            },
+                        ),
                     );
                 });
             }
             if let Some(release) = app.latest_loader_release.clone() {
                 ui.add_space(10.0);
-                elevated_card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(semibold_text(
-                            &format!(
-                                "Geode {} available for GD {}",
-                                release.version, release.gd_win
-                            ),
-                            13.0,
-                            TEXT_PRIMARY,
-                        ));
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if ui
-                                .add(epic_cta_button(ph::DOWNLOAD_SIMPLE, "Install Loader"))
-                                .clicked()
-                            {
-                                app.install_loader_release_async(release);
-                            }
-                        });
+                row_divider(ui);
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(semibold_text(
+                        &format!(
+                            "Geode {} available for GD {}",
+                            release.version, release.gd_win
+                        ),
+                        13.0,
+                        TEXT_PRIMARY,
+                    ));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(epic_cta_button(ph::DOWNLOAD_SIMPLE, "Install Loader"))
+                            .clicked()
+                        {
+                            app.install_loader_release_async(release);
+                        }
                     });
                 });
             }
@@ -522,10 +526,10 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 dialog_frame().show(ui, |ui| {
                     ui.set_max_width(420.0);
                     ui.horizontal(|ui| {
-                        icon_tile(ui, ph::TRASH, 38.0, STATUS_ERR, STATUS_ERR_SOFT);
+                        icon_tile(ui, ph::TRASH, 36.0, STATUS_ERR, STATUS_ERR_SOFT);
                         ui.vertical(|ui| {
-                            ui.label(bold_text("Delete Isolated Install?", 16.0, TEXT_PRIMARY));
-                            ui.label(RichText::new(&install.name).size(12.0).color(TEXT_MUTED));
+                            ui.label(bold_text("Delete Isolated Install?", 15.5, TEXT_PRIMARY));
+                            ui.label(mono_text(&install.name, 11.5, TEXT_MUTED));
                         });
                     });
                     ui.add_space(10.0);
@@ -534,61 +538,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             .size(12.5)
                             .color(TEXT_SECONDARY),
                     );
-                    if !app.discovered_installs.is_empty() {
-        ui.add_space(14.0);
-        card_frame().show(ui, |ui| {
-            ui.label(bold_text(
-                &format!("Discovered GD Installations ({})", app.discovered_installs.len()),
-                15.0,
-                TEXT_PRIMARY,
-            ));
-            ui.add_space(6.0);
-            for disc in app.discovered_installs.clone() {
-                let already = app
-                    .config
-                    .installations
-                    .iter()
-                    .any(|i| i.path.eq_ignore_ascii_case(&disc.path));
-                elevated_card_frame().show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.vertical(|ui| {
-                            ui.set_width((ui.available_width() - 150.0).max(160.0));
-                            ui.horizontal_wrapped(|ui| {
-                                ui.label(bold_text(&disc.name, 13.5, TEXT_PRIMARY));
-                                badge_pill(ui, &disc.source, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
-                                badge_pill(ui, &format!("GD {}", disc.version), TEXT_SECONDARY, BG_SURFACE);
-                            });
-                            ui.label(RichText::new(&disc.path).size(11.5).color(TEXT_MUTED));
-                        });
-                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            if already {
-                                badge_pill(ui, "Registered", STATUS_OK, STATUS_OK_SOFT);
-                            } else if ui.add(epic_cta_button(ph::PLUS, "Register")).clicked() {
-                                let probe = probe_installation(&disc.path);
-                                let id = format!("disc-{}", chrono::Local::now().format("%H%M%S"));
-                                app.config.installations.push(GameInstallation {
-                                    id: id.clone(),
-                                    name: format!("{} ({})", disc.name, disc.source),
-                                    path: disc.path,
-                                    kind: InstallationKind::Custom,
-                                    custom_args: String::new(),
-                                    geode_safe_mode: false,
-                                    notes: "Auto-discovered installation".into(),
-                                    pinned_mod_profile: None,
-                                    detected_gd_version: probe.gd_version,
-                                    detected_geode_version: probe.geode_version,
-                                });
-                                app.switch_active_installation(&id);
-                            }
-                        });
-                    });
-                });
-                ui.add_space(4.0);
-            }
-        });
-    }
-
-    ui.add_space(16.0);
+                    ui.add_space(16.0);
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                         if ui
                             .add(epic_danger_button(ph::TRASH, "Delete Folder"))

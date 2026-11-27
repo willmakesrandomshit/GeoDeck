@@ -663,9 +663,12 @@ fn test_updater_tag_repo_normalization_and_config_migration() {
     let a101 = parse_release_version("Alpha-1.0.1").unwrap();
     let b100 = parse_release_version("Beta-1.0.0").unwrap();
     let v100 = parse_release_version("v1.0.0").unwrap();
+    let rel100 = parse_release_version("1.0.0").unwrap();
     assert!(a101 > a100);
     assert!(b100 > a100);
     assert!(v100 > b100);
+    assert_eq!(rel100, v100);
+    assert!(rel100 > a100);
 
     // Legacy v0.2.0 config migrates automatically to Alpha-1.0.0 defaults
     let legacy_json = r#"{
@@ -758,6 +761,15 @@ fn test_player_stats_grinds_demons_and_pointercrate_crossref() {
     let json = serde_json::to_string(&sum).unwrap();
     assert!(!json.contains("HIDDEN_SECRET_PASS"));
     assert!(!json.contains("HIDDEN_GJP2_SECRET"));
+
+    assert_eq!(
+        geodedeck::tools::demonlist::pointercrate_page_url(150, None),
+        "https://pointercrate.com/api/v2/demons/listed/?limit=100"
+    );
+    assert_eq!(
+        geodedeck::tools::demonlist::pointercrate_page_url(50, Some(100)),
+        "https://pointercrate.com/api/v2/demons/listed/?limit=50&after=100"
+    );
 
     let pc_json = r#"[
         {"position": 1, "name": "Tidal Wave", "requirement": 100, "video": "https://youtu.be/tw", "publisher": {"name": "OniLink"}, "verifier": {"name": "Zoink"}},

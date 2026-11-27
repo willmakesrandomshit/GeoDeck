@@ -10,7 +10,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     section_heading(
         ui,
         "Demonlist & Player Progress",
-        "Track your Geometry Dash progression stats, active grinds, completed demons, and live Pointercrate Top 150 standings.",
+        "Track progression stats, active grinds, completed demons, and Pointercrate Top 150 standings.",
     );
 
     let (stats, grinds_cnt, demons_cnt, player_name, progress_map) = match &app.save_summary {
@@ -33,40 +33,23 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         })
         .count();
 
-    ui.columns(4, |cols| {
-        stat_tile(
-            &mut cols[0],
-            ph::USER_CIRCLE,
-            "PLAYER PROFILE",
-            &player_name,
-            &format!("{} Stars  ·  {} Moons", stats.stars, stats.moons),
-            ACCENT_EPIC_BRIGHT,
-        );
-        stat_tile(
-            &mut cols[1],
-            ph::FIRE,
-            "TOTAL DEMONS",
-            &format!("{}", stats.demons.max(demons_cnt as u64)),
-            &format!("{matched_demons} on Top 150 List"),
-            STATUS_OK,
-        );
-        stat_tile(
-            &mut cols[2],
-            ph::DIAMOND,
-            "DIAMONDS & ORBS",
-            &format!("{}", stats.diamonds),
-            &format!("{} Mana Orbs", stats.orbs),
-            TEXT_PRIMARY,
-        );
-        stat_tile(
-            &mut cols[3],
-            ph::GAME_CONTROLLER,
-            "ATTEMPTS & COINS",
-            &format!("{}", stats.attempts),
-            &format!("{} Secret · {} User Coins", stats.secret_coins, stats.user_coins),
-            TEXT_SECONDARY,
-        );
-    });
+    let demons_val = format!("{}", stats.demons.max(demons_cnt as u64));
+    let matched_sub = format!("{matched_demons} on Top 150 List");
+    let stars_sub = format!("{} Stars  ·  {} Moons", stats.stars, stats.moons);
+    let diamonds_val = format!("{}", stats.diamonds);
+    let orbs_sub = format!("{} Mana Orbs", stats.orbs);
+    let attempts_val = format!("{}", stats.attempts);
+    let coins_sub = format!("{} Secret · {} User Coins", stats.secret_coins, stats.user_coins);
+
+    telemetry_strip(
+        ui,
+        &[
+            ("PLAYER PROFILE", &player_name, &stars_sub, ACCENT_EPIC_BRIGHT),
+            ("TOTAL DEMONS", &demons_val, &matched_sub, STATUS_OK),
+            ("DIAMONDS & ORBS", &diamonds_val, &orbs_sub, TEXT_PRIMARY),
+            ("ATTEMPTS & COINS", &attempts_val, &coins_sub, TEXT_SECONDARY),
+        ],
+    );
 
     ui.add_space(12.0);
 
@@ -194,7 +177,7 @@ fn render_pointercrate(
         return;
     }
 
-    let row_height = 70.0;
+    let row_height = 60.0;
     egui::ScrollArea::vertical()
         .max_height(460.0)
         .show_rows(ui, row_height, items.len(), |ui, range| {
@@ -202,38 +185,34 @@ fn render_pointercrate(
                 let d = items[idx];
                 let progress = match_demon_progress(&d.name, progress_map);
                 let beaten = progress.is_some_and(|(pct, _)| pct >= 100);
-                let frame_resp = elevated_card_frame().show(ui, |ui| {
+                let rank_col = if d.position <= 10 {
+                    ACCENT_EPIC_BRIGHT
+                } else if d.position <= 75 {
+                    STATUS_WARN
+                } else {
+                    TEXT_SECONDARY
+                };
+
+                hover_row(ui, egui::Sense::hover(), |ui| {
                     ui.horizontal(|ui| {
-                        let (badge_fg, badge_bg) = if d.position <= 10 {
-                            (ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT)
-                        } else if d.position <= 75 {
-                            (STATUS_WARN, STATUS_WARN_SOFT)
-                        } else {
-                            (TEXT_PRIMARY, BG_SURFACE)
-                        };
-                        egui::Frame::none()
-                            .fill(badge_bg)
-                            .stroke(Stroke::new(1.0_f32, badge_fg.gamma_multiply(0.3)))
-                            .rounding(Rounding::same(RADIUS_ICON))
-                            .inner_margin(egui::Margin::symmetric(10.0, 9.0))
-                            .show(ui, |ui| {
-                                ui.set_min_width(38.0);
-                                ui.vertical_centered(|ui| {
-                                    ui.label(bold_text(&format!("#{}", d.position), 13.5, badge_fg));
-                                });
-                            });
-                        ui.add_space(6.0);
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(44.0, 32.0),
+                            egui::Layout::right_to_left(egui::Align::Center),
+                            |ui| {
+                                ui.label(mono_text(format!("#{}", d.position), 14.0, rank_col));
+                            },
+                        );
+                        ui.add_space(10.0);
 
                         ui.vertical(|ui| {
-                            ui.set_width((ui.available_width() - 190.0).max(150.0));
+                            ui.set_width((ui.available_width() - 220.0).max(150.0));
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(bold_text(&d.name, 14.5, TEXT_PRIMARY));
-                                badge_pill(
-                                    ui,
-                                    &format!("List {}%", d.requirement),
-                                    TEXT_SECONDARY,
-                                    BG_SURFACE,
-                                );
+                                ui.label(bold_text(&d.name, 14.0, TEXT_PRIMARY));
+                                ui.label(mono_text(
+                                    format!("List {}%", d.requirement),
+                                    11.0,
+                                    TEXT_MUTED,
+                                ));
                                 if let Some((pct, att)) = progress {
                                     if beaten {
                                         status_dot_pill(
@@ -245,7 +224,7 @@ fn render_pointercrate(
                                     } else if pct > 0 {
                                         badge_pill(
                                             ui,
-                                            &format!("{pct}% ({att} att)"),
+                                            &format!("{pct}% · {att} att"),
                                             ACCENT_EPIC_BRIGHT,
                                             ACCENT_EPIC_SOFT,
                                         );
@@ -277,14 +256,9 @@ fn render_pointercrate(
                         });
                     });
                 });
-                if frame_resp.response.hovered() {
-                    ui.painter().rect_stroke(
-                        frame_resp.response.rect,
-                        Rounding::same(RADIUS_CARD),
-                        Stroke::new(1.0_f32, BORDER_STRONG),
-                    );
+                if idx + 1 < items.len() {
+                    row_divider(ui);
                 }
-                ui.add_space(5.0);
             }
         });
 }
@@ -316,30 +290,31 @@ fn render_level_entries(
         return;
     }
 
+    let len = filtered.len();
     egui::ScrollArea::vertical()
         .max_height(460.0)
         .show(ui, |ui| {
-            for e in filtered {
-                elevated_card_frame().show(ui, |ui| {
+            for (idx, e) in filtered.into_iter().enumerate() {
+                hover_row(ui, egui::Sense::hover(), |ui| {
                     ui.horizontal(|ui| {
+                        let (fg, bg) = if completed_mode {
+                            (STATUS_OK, STATUS_OK_SOFT)
+                        } else {
+                            (ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT)
+                        };
                         icon_tile(
                             ui,
                             if completed_mode { ph::CHECK_CIRCLE } else { ph::FIRE },
-                            40.0,
-                            if completed_mode { STATUS_OK } else { ACCENT_EPIC_BRIGHT },
-                            if completed_mode { STATUS_OK_SOFT } else { ACCENT_EPIC_SOFT },
+                            34.0,
+                            fg,
+                            bg,
                         );
                         ui.add_space(6.0);
                         ui.vertical(|ui| {
-                            ui.set_width((ui.available_width() - 180.0).max(150.0));
+                            ui.set_width((ui.available_width() - 150.0).max(150.0));
                             ui.horizontal_wrapped(|ui| {
-                                ui.label(bold_text(&e.name, 14.0, TEXT_PRIMARY));
-                                badge_pill(
-                                    ui,
-                                    &format!("{}★", e.stars),
-                                    STATUS_WARN,
-                                    STATUS_WARN_SOFT,
-                                );
+                                ui.label(bold_text(&e.name, 13.5, TEXT_PRIMARY));
+                                ui.label(mono_text(format!("{}★", e.stars), 11.5, STATUS_WARN));
                             });
                             ui.label(
                                 RichText::new(format!(
@@ -351,20 +326,40 @@ fn render_level_entries(
                             );
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            status_dot_pill(
-                                ui,
-                                &format!("{}%", e.percent),
-                                if e.percent >= 100 { STATUS_OK } else { ACCENT_EPIC_BRIGHT },
-                                if e.percent >= 100 {
-                                    STATUS_OK_SOFT
-                                } else {
-                                    ACCENT_EPIC_SOFT
-                                },
-                            );
+                            let pct_col = if e.percent >= 100 {
+                                STATUS_OK
+                            } else {
+                                ACCENT_EPIC_BRIGHT
+                            };
+                            ui.label(mono_text(format!("{}%", e.percent), 13.5, pct_col));
+                            if !completed_mode {
+                                let bar_w = 56.0;
+                                let (bar_rect, _) = ui.allocate_exact_size(
+                                    egui::vec2(bar_w, 4.0),
+                                    egui::Sense::hover(),
+                                );
+                                ui.painter().rect_filled(
+                                    bar_rect,
+                                    Rounding::same(2.0),
+                                    BG_ELEVATED,
+                                );
+                                let fill_w = (bar_w * (e.percent as f32 / 100.0)).clamp(3.0, bar_w);
+                                ui.painter().rect_filled(
+                                    egui::Rect::from_min_size(
+                                        bar_rect.min,
+                                        egui::vec2(fill_w, 4.0),
+                                    ),
+                                    Rounding::same(2.0),
+                                    ACCENT_EPIC,
+                                );
+                                let _ = Stroke::NONE;
+                            }
                         });
                     });
                 });
-                ui.add_space(5.0);
+                if idx + 1 < len {
+                    row_divider(ui);
+                }
             }
         });
 }

@@ -6,7 +6,7 @@ use std::io::Read;
 use std::path::PathBuf;
 use std::time::Duration;
 
-pub const APP_RELEASE_TAG: &str = "Alpha-1.0.0";
+pub const APP_RELEASE_TAG: &str = "1.0.0";
 
 #[derive(Clone, Debug)]
 pub struct UpdateCheckResult {
@@ -210,7 +210,7 @@ pub fn check_github_updates(repo: &str) -> Result<UpdateCheckResult, String> {
         .map_err(|e| format!("Failed to parse GitHub releases JSON: {e}"))?;
 
     let current_ver = parse_release_version(APP_RELEASE_TAG)
-        .unwrap_or_else(|_| Version::parse("1.0.0-alpha.0").unwrap());
+        .unwrap_or_else(|_| Version::parse("1.0.0").unwrap());
 
     let mut best: Option<(Version, GithubRelease)> = None;
     for rel in releases {

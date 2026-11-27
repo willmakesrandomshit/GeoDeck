@@ -1,15 +1,19 @@
-name: Build & Publish GeoDeck Pre-Release
+name: Build & Publish GeoDeck Release
 
 on:
   workflow_dispatch:
     inputs:
       release_tag:
-        description: "Target pre-release tag to update (must stay Alpha-1.0.0 unless intentionally bumped)"
+        description: "Target release tag to build & publish"
         required: true
-        default: "Alpha-1.0.0"
+        default: "1.0.0"
   push:
     tags:
+      - "1.*"
+      - "2.*"
       - "Alpha-*"
+      - "Beta-*"
+      - "RC-*"
 
 permissions:
   contents: write
@@ -171,7 +175,7 @@ jobs:
           if-no-files-found: error
 
   publish-release:
-    name: Update Existing Pre-Release
+    name: Publish Cross-Platform Release
     needs: [resolve-tag, build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
@@ -179,7 +183,7 @@ jobs:
       - uses: actions/download-artifact@v4
         with:
           path: raw_artifacts
-      - name: Gather assets, generate SHA256SUMS.txt, and upload to pre-release
+      - name: Gather assets, generate SHA256SUMS.txt, and publish release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -194,36 +198,50 @@ jobs:
           )
 
           cat <<'EOF' > release_notes.md
-          ## GeoDeck Alpha-1.0.0 — Cross-Platform Release (Windows, Linux & macOS)
+          ## GeoDeck __TAG__ — Cross-Platform Release (Windows, Linux & macOS)
 
-          Pre-release build with full **GeodeSync v3.0.1 feature parity**, rounded Obsidian Orbital Purple UI, native Discord Rich Presence, offline-first NONG song metadata resolution, and automatic verified GitHub updates.
+          Full desktop manager for Geometry Dash with a redesigned **Precision Rhythm Workbench** UI, bundled static typography (Space Grotesk, IBM Plex Sans, JetBrains Mono), official Geometry Dash hero artwork, paginated Pointercrate Top 150 Demonlist + save progress matching, DPAPI AES-256-GCM Encrypted Save Vault, NONG song library, native Discord Rich Presence, and verified GitHub auto-updates.
 
           ### Downloads
-          - **Windows (x64):** `GeoDeck-Alpha-1.0.0-windows-x64.exe` (standalone) or `GeoDeck-Alpha-1.0.0-windows-x64.zip`
-          - **Linux / Steam Deck (x64, glibc 2.35):** `GeoDeck-Alpha-1.0.0-linux-x64.tar.gz`
-          - **macOS (Apple Silicon arm64):** `GeoDeck-Alpha-1.0.0-macos-arm64.zip` (`GeoDeck.app`)
-          - **macOS (Intel x64):** `GeoDeck-Alpha-1.0.0-macos-x64.zip` (`GeoDeck.app`)
+          - **Windows (x64):** `GeoDeck-__TAG__-windows-x64.exe` (standalone) or `GeoDeck-__TAG__-windows-x64.zip`
+          - **Linux / Steam Deck (x64, glibc 2.35):** `GeoDeck-__TAG__-linux-x64.tar.gz`
+          - **macOS (Apple Silicon arm64):** `GeoDeck-__TAG__-macos-arm64.zip` (`GeoDeck.app`)
+          - **macOS (Intel x64):** `GeoDeck-__TAG__-macos-x64.zip` (`GeoDeck.app`)
           - **Checksums:** `SHA256SUMS.txt` and per-asset `.sha256` sidecars
 
-          ### What's Included
-          - **Demonlist & Player Progress:** Live Pointercrate Top 150 cross-referenced against local `CCGameManager.dat` progress (`BEATEN 100%` / `X% (N att)`), Stars, Demons, Moons, Diamonds, Coins, Orbs, Active Grinds, and Completed Demons.
-          - **Texture Pack Manager & Audio Hub:** Safe `.zip`/folder texture pack installation with automatic `Resources_Vanilla_Backup`, IEEE CRC-32 PNG structural validation before restoring vanilla assets, plus 1-click Practice Music (`StayInsideMe.mp3`) and Custom Death SFX (`explode_11.ogg`) replacers.
-          - **Save Vault, Slots, Salvage & Compactor:** DPAPI / `0600` AES-256-GCM snapshots, Multi-Profile Save Slots, Save Doctor `.dat`/`.bak` salvage, `CCLocalLevels.dat` bloat compactor, and portable `.geodesync` setup bundles.
-          - **8-Point Health Diagnostics (`Ctrl+H`) & Error Explainer:** Steam layout check, Windows PE x86/x64 DLL mismatch check, VC++ x86 check, OneDrive stub pinning, PNG integrity scan, disk/write check, multi-install discovery, Plain-English Error Explainer, and privacy-redacted Support Report export.
-          - **Mod Studio & Launch Controls:** Keybind Doctor collision scanner, Quick Mod Presets (`Boosted`, `Vanilla`, `Tournament`, `Globed`), Steam `appmanifest_322170.acf` Update Lock, `prevter.imageplus` v1.1.1 safeguard, category filters, NONG Song Library, auto Maximum Performance profile, native Discord Rich Presence, and keyboard shortcuts (`Ctrl+1..7`, `Ctrl+F`, `Ctrl+H`, `F5`).
+          ### Highlights
+          - **Demonlist & Player Progress:** Paginated Pointercrate Top 150 API client cross-referenced against local `CCGameManager.dat` progress (`BEATEN 100%` / `X% · N att`), Stars, Demons, Moons, Diamonds, Coins, Orbs, Active Grinds, and Completed Demons.
+          - **Encrypted Save Vault, Slots, Salvage & Compactor:** DPAPI / `0600` AES-256-GCM snapshots, Multi-Profile Save Slots, Save Doctor `.dat`/`.bak` salvage, `CCLocalLevels.dat` bloat compactor, and portable `.geodesync` setup bundles.
+          - **Texture Pack Manager & NONG Audio Hub:** Safe `.zip`/folder texture packs with automatic `Resources_Vanilla_Backup`, IEEE CRC-32 PNG structural verification, Practice Music / Death SFX replacers, and offline-first human-readable NONG song library.
+          - **8-Point Health Diagnostics (`Ctrl+H`) & Mod Studio:** Steam layout check, Windows PE x86/x64 audit, VC++ x86 check, OneDrive stub pinning, Keybind Doctor collision scanner, Quick Mod Presets, Steam Update Lock, `prevter.imageplus` safeguard, and native Discord RPC.
           EOF
+          sed -i "s/__TAG__/${TAG}/g" release_notes.md
+
+          if [[ "$TAG" == Alpha-* || "$TAG" == Beta-* || "$TAG" == RC-* || "$TAG" == *-* ]]; then
+            REL_FLAGS=(--prerelease)
+          else
+            REL_FLAGS=(--prerelease=false --latest)
+          fi
 
           if gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release upload "$TAG" release_assets/* --repo "${{ github.repository }}" --clobber
             gh release edit "$TAG" \
               --repo "${{ github.repository }}" \
-              --prerelease \
+              "${REL_FLAGS[@]}" \
               --title "GeoDeck ${TAG}" \
               --notes-file release_notes.md
           else
-            gh release create "$TAG" release_assets/* \
-              --repo "${{ github.repository }}" \
-              --prerelease \
-              --title "GeoDeck ${TAG}" \
-              --notes-file release_notes.md
+            if [[ "$TAG" == Alpha-* || "$TAG" == Beta-* || "$TAG" == RC-* || "$TAG" == *-* ]]; then
+              gh release create "$TAG" release_assets/* \
+                --repo "${{ github.repository }}" \
+                --prerelease \
+                --title "GeoDeck ${TAG}" \
+                --notes-file release_notes.md
+            else
+              gh release create "$TAG" release_assets/* \
+                --repo "${{ github.repository }}" \
+                --latest \
+                --title "GeoDeck ${TAG}" \
+                --notes-file release_notes.md
+            fi
           fi

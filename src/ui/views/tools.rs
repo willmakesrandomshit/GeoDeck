@@ -53,23 +53,16 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 
 fn render_health_check(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     card_frame().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            icon_tile(ui, ph::SHIELD_CHECK, 38.0, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
-            ui.add_space(4.0);
-            ui.vertical(|ui| {
-                ui.set_max_width((ui.available_width() - 56.0).max(200.0));
-                ui.label(bold_text(
-                    "8-Point Installation Health & Diagnostics (Ctrl+H)",
-                    15.5,
-                    TEXT_PRIMARY,
-                ));
-                ui.label(
-                    RichText::new("Checks Steam layout, PE/app integrity, VC++ runtime, PNG textures, OneDrive locks, write permissions, and multiple installs.")
-                        .size(12.0)
-                        .color(TEXT_SECONDARY),
-                );
-            });
-        });
+        ui.label(bold_text(
+            "8-Point Installation Health & Diagnostics (Ctrl+H)",
+            15.0,
+            TEXT_PRIMARY,
+        ));
+        ui.label(
+            RichText::new("Checks Steam layout, PE/app integrity, VC++ runtime, PNG textures, OneDrive locks, write permissions, and multiple installs.")
+                .size(12.0)
+                .color(TEXT_SECONDARY),
+        );
 
         ui.add_space(10.0);
         ui.horizontal_wrapped(|ui| {
@@ -152,7 +145,7 @@ fn render_health_check(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             }
         });
 
-        ui.add_space(12.0);
+        ui.add_space(10.0);
         if app.health_findings.is_empty() {
             empty_state_card(
                 ui,
@@ -161,18 +154,19 @@ fn render_health_check(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 "Inspecting binaries, PNG textures, and environment health.",
             );
         } else {
-            for f in &app.health_findings {
+            let len = app.health_findings.len();
+            for (idx, f) in app.health_findings.iter().enumerate() {
                 let (col, bg, tag) = match f.severity {
                     DiagnosticSeverity::Ok => (STATUS_OK, STATUS_OK_SOFT, "PASS"),
                     DiagnosticSeverity::Warning => (STATUS_WARN, STATUS_WARN_SOFT, "WARN"),
                     DiagnosticSeverity::Error => (STATUS_ERR, STATUS_ERR_SOFT, "ISSUE"),
                 };
-                elevated_card_frame().show(ui, |ui| {
+                hover_row(ui, egui::Sense::hover(), |ui| {
                     ui.horizontal_wrapped(|ui| {
                         badge_pill(ui, tag, col, bg);
                         ui.label(bold_text(&f.title, 13.5, TEXT_PRIMARY));
                     });
-                    ui.add_space(3.0);
+                    ui.add_space(2.0);
                     ui.label(RichText::new(&f.detail).size(12.0).color(TEXT_SECONDARY));
                     if f.severity != DiagnosticSeverity::Ok {
                         ui.add_space(2.0);
@@ -183,16 +177,18 @@ fn render_health_check(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         );
                     }
                 });
-                ui.add_space(6.0);
+                if idx + 1 < len {
+                    row_divider(ui);
+                }
             }
         }
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
     // Plain-English Error Explainer Card
     card_frame().show(ui, |ui| {
-        ui.label(bold_text("Plain-English Error Explainer", 15.5, TEXT_PRIMARY));
+        ui.label(bold_text("Plain-English Error Explainer", 15.0, TEXT_PRIMARY));
         ui.label(
             RichText::new("Paste any confusing Geometry Dash, Steam, Geode, or OS error code (e.g. 0xc000007b, WinError 32, 0x8007016a) for safe recovery steps.")
                 .size(12.0)
@@ -218,7 +214,7 @@ fn render_health_check(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             ui.add_space(10.0);
             inset_frame().show(ui, |ui| {
                 ui.set_min_width(ui.available_width());
-                ui.label(bold_text(title, 14.0, ACCENT_EPIC_BRIGHT));
+                ui.label(bold_text(title, 13.5, ACCENT_EPIC_BRIGHT));
                 ui.add_space(4.0);
                 ui.label(RichText::new(body).size(12.5).color(TEXT_PRIMARY));
             });
@@ -230,38 +226,33 @@ fn render_textures(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     let st = app.assets_status.clone();
     card_frame().show(ui, |ui| {
         ui.horizontal_wrapped(|ui| {
-            icon_tile(ui, ph::PALETTE, 38.0, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
-            ui.add_space(4.0);
-            ui.vertical(|ui| {
-                ui.horizontal_wrapped(|ui| {
-                    ui.label(bold_text("Texture Pack Manager", 16.0, TEXT_PRIMARY));
-                    status_dot_pill(
-                        ui,
-                        &st.active_pack,
-                        if st.active_pack.contains("Vanilla") {
-                            STATUS_OK
-                        } else {
-                            ACCENT_EPIC_BRIGHT
-                        },
-                        if st.active_pack.contains("Vanilla") {
-                            STATUS_OK_SOFT
-                        } else {
-                            ACCENT_EPIC_SOFT
-                        },
-                    );
-                });
-                ui.label(
-                    RichText::new(format!(
-                        "Automatically safeguards vanilla assets in Resources_Vanilla_Backup ({} files) and verifies every PNG CRC-32 checksum before restoring.",
-                        st.vanilla_file_count
-                    ))
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
-                );
-            });
+            ui.label(bold_text("Texture Pack Manager", 15.5, TEXT_PRIMARY));
+            status_dot_pill(
+                ui,
+                &st.active_pack,
+                if st.active_pack.contains("Vanilla") {
+                    STATUS_OK
+                } else {
+                    ACCENT_EPIC_BRIGHT
+                },
+                if st.active_pack.contains("Vanilla") {
+                    STATUS_OK_SOFT
+                } else {
+                    ACCENT_EPIC_SOFT
+                },
+            );
         });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(format!(
+                "Automatically safeguards vanilla assets in Resources_Vanilla_Backup ({} files) and verifies every PNG CRC-32 checksum before restoring.",
+                st.vanilla_file_count
+            ))
+            .size(12.0)
+            .color(TEXT_SECONDARY),
+        );
 
-        ui.add_space(14.0);
+        ui.add_space(12.0);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x = 8.0;
             if ui
@@ -325,10 +316,8 @@ fn render_textures(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 fn render_crashes(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     card_frame().show(ui, |ui| {
         ui.horizontal(|ui| {
-            icon_tile(ui, ph::BUG, 38.0, STATUS_WARN, STATUS_WARN_SOFT);
-            ui.add_space(4.0);
             ui.vertical(|ui| {
-                ui.label(bold_text("Geode Crash Log Analyzer", 16.0, TEXT_PRIMARY));
+                ui.label(bold_text("Geode Crash Log Analyzer", 15.5, TEXT_PRIMARY));
                 ui.label(
                     RichText::new("Scans <game>/geode/crashlogs and identifies faulty modules")
                         .size(12.0)
@@ -344,7 +333,7 @@ fn render_crashes(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 }
             });
         });
-        ui.add_space(12.0);
+        ui.add_space(10.0);
 
         if app.crash_reports.is_empty() {
             empty_state_card(
@@ -356,41 +345,40 @@ fn render_crashes(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             return;
         }
 
-        for rep in app.crash_reports.clone() {
-            elevated_card_frame().show(ui, |ui| {
+        let reps = app.crash_reports.clone();
+        let len = reps.len();
+        for (idx, rep) in reps.into_iter().enumerate() {
+            hover_row(ui, egui::Sense::hover(), |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(bold_text(&rep.faulty_mod_name, 14.5, STATUS_ERR));
+                    ui.label(bold_text(&rep.faulty_mod_name, 14.0, STATUS_ERR));
                     badge_pill(ui, &rep.exception_code, STATUS_WARN, STATUS_WARN_SOFT);
                 });
                 ui.add_space(2.0);
                 ui.label(
-                    RichText::new(format!("{}  ·  Loader {}", rep.timestamp, rep.loader_version))
-                        .size(11.5)
-                        .color(TEXT_MUTED),
+                    mono_text(
+                        format!("{}  ·  Loader {}", rep.timestamp, rep.loader_version),
+                        11.0,
+                        TEXT_MUTED,
+                    ),
                 );
                 if !rep.exception_details.is_empty() {
                     ui.add_space(4.0);
                     ui.label(
                         RichText::new(&rep.exception_details)
-                            .size(12.5)
+                            .size(12.0)
                             .color(TEXT_SECONDARY),
                     );
                 }
                 if !rep.stack_trace.is_empty() {
-                    ui.add_space(8.0);
+                    ui.add_space(6.0);
                     inset_frame().show(ui, |ui| {
                         ui.set_min_width(ui.available_width());
                         for frame in rep.stack_trace.iter().take(5) {
-                            ui.label(
-                                RichText::new(frame)
-                                    .size(11.5)
-                                    .monospace()
-                                    .color(TEXT_SECONDARY),
-                            );
+                            ui.label(mono_text(frame, 11.0, TEXT_SECONDARY));
                         }
                     });
                 }
-                ui.add_space(10.0);
+                ui.add_space(8.0);
                 ui.horizontal_wrapped(|ui| {
                     if let Some(ref mod_id) = rep.faulty_mod_id {
                         if ui
@@ -447,30 +435,26 @@ fn render_crashes(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     }
                 });
             });
-            ui.add_space(8.0);
+            if idx + 1 < len {
+                row_divider(ui);
+            }
         }
     });
 }
 
 fn render_levels(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     card_frame().show(ui, |ui| {
-        ui.horizontal(|ui| {
-            icon_tile(ui, ph::LAYERS, 38.0, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT);
-            ui.add_space(4.0);
-            ui.vertical(|ui| {
-                ui.label(bold_text(
-                    "Created Editor Levels (CCLocalLevels.dat)",
-                    16.0,
-                    TEXT_PRIMARY,
-                ));
-                ui.label(
-                    RichText::new("Inspect local editor projects and export standalone .gmd files")
-                        .size(12.0)
-                        .color(TEXT_SECONDARY),
-                );
-            });
-        });
-        ui.add_space(12.0);
+        ui.label(bold_text(
+            "Created Editor Levels (CCLocalLevels.dat)",
+            15.5,
+            TEXT_PRIMARY,
+        ));
+        ui.label(
+            RichText::new("Inspect local editor projects and export standalone .gmd files")
+                .size(12.0)
+                .color(TEXT_SECONDARY),
+        );
+        ui.add_space(10.0);
 
         if let Some(sum) = app.save_summary.clone() {
             if sum.levels.is_empty() {
@@ -481,7 +465,8 @@ fn render_levels(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     "Create a level in Geometry Dash's editor to inspect or export it here.",
                 );
             } else {
-                for lvl in &sum.levels {
+                let len = sum.levels.len();
+                for (idx, lvl) in sum.levels.iter().enumerate() {
                     let song_label = app
                         .song_report
                         .songs
@@ -498,24 +483,17 @@ fn render_levels(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         })
                         .unwrap_or_else(|| format!("Song ID {}", lvl.song_id));
 
-                    elevated_card_frame().show(ui, |ui| {
+                    hover_row(ui, egui::Sense::hover(), |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
-                                ui.set_width((ui.available_width() - 160.0).max(160.0));
+                                ui.set_width((ui.available_width() - 150.0).max(160.0));
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label(bold_text(&lvl.name, 14.5, TEXT_PRIMARY));
-                                    badge_pill(
-                                        ui,
-                                        &format!("Rev {}", lvl.revision),
-                                        TEXT_SECONDARY,
-                                        BG_SURFACE,
-                                    );
-                                    badge_pill(
-                                        ui,
-                                        &song_label,
-                                        ACCENT_EPIC_BRIGHT,
-                                        ACCENT_EPIC_SOFT,
-                                    );
+                                    ui.label(bold_text(&lvl.name, 14.0, TEXT_PRIMARY));
+                                    ui.label(mono_text(
+                                        format!("Rev {}  ·  {song_label}", lvl.revision),
+                                        11.0,
+                                        TEXT_MUTED,
+                                    ));
                                 });
                                 ui.label(
                                     RichText::new(if lvl.description.is_empty() {
@@ -564,7 +542,9 @@ fn render_levels(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             );
                         });
                     });
-                    ui.add_space(6.0);
+                    if idx + 1 < len {
+                        row_divider(ui);
+                    }
                 }
             }
         } else {
@@ -580,139 +560,198 @@ fn render_levels(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 
 fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     let assets_st = app.assets_status.clone();
-    card_frame().show(ui, |ui| {
-        // Practice Music & Custom Death SFX Audio Replacers
-        ui.spacing_mut().item_spacing.x = 12.0;
-        ui.columns(2, |cols| {
-            let col0_w = (cols[0].available_width() - 28.0).max(150.0);
-            inset_frame().show(&mut cols[0], |ui| {
-                ui.set_width(col0_w);
-                ui.set_max_width(col0_w);
-                ui.horizontal(|ui| {
-                    ui.label(bold_text("Practice Mode Music", 13.5, TEXT_PRIMARY));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        badge_pill(
-                            ui,
-                            if assets_st.practice_music_custom {
-                                "Custom Active"
-                            } else {
-                                "Vanilla"
-                            },
-                            if assets_st.practice_music_custom {
-                                ACCENT_EPIC_BRIGHT
-                            } else {
-                                STATUS_OK
-                            },
-                            if assets_st.practice_music_custom {
-                                ACCENT_EPIC_SOFT
-                            } else {
-                                STATUS_OK_SOFT
-                            },
-                        );
-                    });
-                });
-                ui.add_space(6.0);
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add(epic_secondary_button(
-                            ph::MUSIC_NOTE,
-                            "Replace StayInsideMe.mp3",
-                        ))
-                        .clicked()
-                    {
-                        if let Some(file) = rfd::FileDialog::new()
-                            .add_filter("MP3 Audio", &["mp3"])
-                            .pick_file()
-                        {
-                            app.replace_practice_music_async(file);
-                        }
-                    }
-                    if assets_st.practice_music_custom
-                        && ui
-                            .add(epic_secondary_button(
-                                ph::ARROW_COUNTER_CLOCKWISE,
-                                "Restore Vanilla",
-                            ))
-                            .clicked()
-                    {
-                        app.restore_practice_music_async();
-                    }
-                });
-            });
 
-            let col1_w = (cols[1].available_width() - 28.0).max(150.0);
-            inset_frame().show(&mut cols[1], |ui| {
-                ui.set_width(col1_w);
-                ui.set_max_width(col1_w);
-                ui.horizontal(|ui| {
-                    ui.label(bold_text("Custom Death SFX", 13.5, TEXT_PRIMARY));
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        badge_pill(
-                            ui,
-                            if assets_st.death_sfx_custom {
-                                "Custom Active"
-                            } else {
-                                "Vanilla"
-                            },
-                            if assets_st.death_sfx_custom {
-                                ACCENT_EPIC_BRIGHT
-                            } else {
-                                STATUS_OK
-                            },
-                            if assets_st.death_sfx_custom {
-                                ACCENT_EPIC_SOFT
-                            } else {
-                                STATUS_OK_SOFT
-                            },
-                        );
+    // Standalone compact Audio Overrides bar (two hairline-divided halves, zero nested boxes)
+    let mut audio_div_x: Option<f32> = None;
+    let audio_bar = egui::Frame::none()
+        .fill(BG_SURFACE)
+        .stroke(Stroke::new(1.0_f32, BORDER_SUBTLE))
+        .rounding(Rounding::same(RADIUS_PANEL))
+        .inner_margin(egui::Margin::symmetric(16.0, 12.0))
+        .show(ui, |ui| {
+            ui.columns(2, |cols| {
+                {
+                    let c0 = &mut cols[0];
+                    c0.horizontal(|ui| {
+                        ui.label(bold_text("Practice Mode Music", 13.5, TEXT_PRIMARY));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            status_dot_pill(
+                                ui,
+                                if assets_st.practice_music_custom {
+                                    "Custom Active"
+                                } else {
+                                    "Vanilla"
+                                },
+                                if assets_st.practice_music_custom {
+                                    ACCENT_EPIC_BRIGHT
+                                } else {
+                                    STATUS_OK
+                                },
+                                if assets_st.practice_music_custom {
+                                    ACCENT_EPIC_SOFT
+                                } else {
+                                    STATUS_OK_SOFT
+                                },
+                            );
+                        });
                     });
-                });
-                ui.add_space(6.0);
-                ui.horizontal_wrapped(|ui| {
-                    if ui
-                        .add(epic_secondary_button(
-                            ph::SPEAKER_HIGH,
-                            "Replace explode_11.ogg",
-                        ))
-                        .clicked()
-                    {
-                        if let Some(file) = rfd::FileDialog::new()
-                            .add_filter("Ogg Vorbis SFX", &["ogg"])
-                            .pick_file()
-                        {
-                            app.replace_death_sfx_async(file);
-                        }
-                    }
-                    if assets_st.death_sfx_custom
-                        && ui
+                    c0.add_space(6.0);
+                    c0.horizontal_wrapped(|ui| {
+                        if ui
                             .add(epic_secondary_button(
-                                ph::ARROW_COUNTER_CLOCKWISE,
-                                "Restore Vanilla",
+                                ph::MUSIC_NOTE,
+                                "Replace StayInsideMe.mp3",
                             ))
                             .clicked()
-                    {
-                        app.restore_death_sfx_async();
-                    }
-                });
+                        {
+                            if let Some(file) = rfd::FileDialog::new()
+                                .add_filter("MP3 Audio", &["mp3"])
+                                .pick_file()
+                            {
+                                app.replace_practice_music_async(file);
+                            }
+                        }
+                        if assets_st.practice_music_custom
+                            && ui
+                                .add(epic_secondary_button(
+                                    ph::ARROW_COUNTER_CLOCKWISE,
+                                    "Restore Vanilla",
+                                ))
+                                .clicked()
+                        {
+                            app.restore_practice_music_async();
+                        }
+                    });
+                }
+
+                {
+                    let c1 = &mut cols[1];
+                    audio_div_x = Some((c1.max_rect().left() - 4.0).round());
+                    egui::Frame::none()
+                        .inner_margin(egui::Margin {
+                            left: 8.0,
+                            right: 0.0,
+                            top: 0.0,
+                            bottom: 0.0,
+                        })
+                        .show(c1, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label(bold_text("Custom Death SFX", 13.5, TEXT_PRIMARY));
+                                ui.with_layout(
+                                    egui::Layout::right_to_left(egui::Align::Center),
+                                    |ui| {
+                                        status_dot_pill(
+                                            ui,
+                                            if assets_st.death_sfx_custom {
+                                                "Custom Active"
+                                            } else {
+                                                "Vanilla"
+                                            },
+                                            if assets_st.death_sfx_custom {
+                                                ACCENT_EPIC_BRIGHT
+                                            } else {
+                                                STATUS_OK
+                                            },
+                                            if assets_st.death_sfx_custom {
+                                                ACCENT_EPIC_SOFT
+                                            } else {
+                                                STATUS_OK_SOFT
+                                            },
+                                        );
+                                    },
+                                );
+                            });
+                            ui.add_space(6.0);
+                            ui.horizontal_wrapped(|ui| {
+                                if ui
+                                    .add(epic_secondary_button(
+                                        ph::SPEAKER_HIGH,
+                                        "Replace explode_11.ogg",
+                                    ))
+                                    .clicked()
+                                {
+                                    if let Some(file) = rfd::FileDialog::new()
+                                        .add_filter("Ogg Vorbis SFX", &["ogg"])
+                                        .pick_file()
+                                    {
+                                        app.replace_death_sfx_async(file);
+                                    }
+                                }
+                                if assets_st.death_sfx_custom
+                                    && ui
+                                        .add(epic_secondary_button(
+                                            ph::ARROW_COUNTER_CLOCKWISE,
+                                            "Restore Vanilla",
+                                        ))
+                                        .clicked()
+                                {
+                                    app.restore_death_sfx_async();
+                                }
+                            });
+                        });
+                }
             });
         });
 
-        ui.add_space(12.0);
-        // Header Row (Title & Badges on left, Action buttons below or right without overlap)
+    if let Some(x) = audio_div_x {
+        let r = audio_bar.response.rect;
+        ui.painter().line_segment(
+            [egui::pos2(x, r.top() + 10.0), egui::pos2(x, r.bottom() - 10.0)],
+            Stroke::new(1.0_f32, BORDER_SUBTLE),
+        );
+    }
+
+    ui.add_space(12.0);
+
+    card_frame().show(ui, |ui| {
+        // Header Row: Title + right-aligned actions on Row 1, stats directly beneath so 920px never overlaps
+        ui.horizontal(|ui| {
+            ui.label(bold_text("NONG Song Library", 16.0, TEXT_PRIMARY));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                if ui
+                    .add_enabled(
+                        !app.song_metadata_resolving,
+                        epic_secondary_button(ph::GLOBE, "Resolve Metadata"),
+                    )
+                    .on_hover_text("Lookup missing song titles and artists from official GD servers")
+                    .clicked()
+                {
+                    app.resolve_missing_song_metadata_async(true);
+                }
+                if ui
+                    .add(epic_secondary_button(ph::ARROWS_CLOCKWISE, "Rescan"))
+                    .on_hover_text("Rescan Geometry Dash local audio cache")
+                    .clicked()
+                {
+                    app.refresh_tools_async();
+                }
+                if app.song_report.zero_byte_count > 0
+                    && ui
+                        .add(epic_danger_button(
+                            ph::TRASH,
+                            &format!("Clean {} Broken", app.song_report.zero_byte_count),
+                        ))
+                        .on_hover_text("Remove 0-byte corrupted audio files")
+                        .clicked()
+                {
+                    let _ = remove_broken_zero_byte_songs();
+                    app.refresh_tools_async();
+                }
+            });
+        });
+        ui.add_space(4.0);
         ui.horizontal_wrapped(|ui| {
-            ui.label(bold_text("NONG Song Library", 17.0, TEXT_PRIMARY));
-            status_dot_pill(
-                ui,
-                &format!("{} songs cached", app.song_report.total_songs),
-                STATUS_OK,
-                STATUS_OK_SOFT,
-            );
-            badge_pill(
-                ui,
-                &human_bytes(app.song_report.total_bytes),
-                TEXT_SECONDARY,
-                BG_ELEVATED,
-            );
+            ui.label(mono_text(
+                format!(
+                    "{} cached  ·  {}  ·  {} resolved",
+                    app.song_report.total_songs,
+                    human_bytes(app.song_report.total_bytes),
+                    app.song_report.resolved_count
+                ),
+                11.5,
+                TEXT_MUTED,
+            ));
             if app.song_report.nong_count > 0 {
                 badge_pill(
                     ui,
@@ -722,97 +761,61 @@ fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 );
             }
             if app.song_metadata_resolving {
-                ui.horizontal(|ui| {
-                    ui.spinner();
-                    ui.label(
-                        RichText::new("Resolving metadata...")
-                            .size(11.5)
-                            .color(ACCENT_EPIC_BRIGHT),
-                    );
-                });
+                ui.spinner();
+                ui.label(
+                    RichText::new("Resolving metadata...")
+                        .size(11.5)
+                        .color(ACCENT_EPIC_BRIGHT),
+                );
             }
         });
-        ui.add_space(8.0);
+
+        ui.add_space(10.0);
+        row_divider(ui);
+        ui.add_space(6.0);
+
+        // Quick NONG Replace inline bar (flat, no nested inset card)
         ui.horizontal_wrapped(|ui| {
-            ui.spacing_mut().item_spacing.x = 6.0;
+            ui.label(semibold_text("Quick NONG Replace:", 12.0, TEXT_SECONDARY));
+            styled_text_input(ui, &mut app.ui_state.nong_song_id, "Song ID (e.g. 1036782)", 175.0);
             if ui
-                .add_enabled(
-                    !app.song_metadata_resolving,
-                    epic_secondary_button(ph::GLOBE, "Resolve Metadata"),
-                )
-                .on_hover_text("Lookup missing song titles and artists from official GD servers")
+                .add(brand_cta_button(
+                    ph::MUSIC_NOTE,
+                    "Replace with Custom Audio",
+                ))
+                .on_hover_text("Backs up original track before copying custom .mp3/.ogg")
                 .clicked()
             {
-                app.resolve_missing_song_metadata_async(true);
-            }
-            if ui
-                .add(epic_secondary_button(ph::ARROWS_CLOCKWISE, "Rescan"))
-                .on_hover_text("Rescan Geometry Dash local audio cache")
-                .clicked()
-            {
-                app.refresh_tools_async();
-            }
-            if app.song_report.zero_byte_count > 0
-                && ui
-                    .add(epic_danger_button(
-                        ph::TRASH,
-                        &format!("Clean {} Broken", app.song_report.zero_byte_count),
-                    ))
-                    .on_hover_text("Remove 0-byte corrupted audio files")
-                    .clicked()
-            {
-                let _ = remove_broken_zero_byte_songs();
-                app.refresh_tools_async();
-            }
-        });
-
-        ui.add_space(12.0);
-
-        // Quick NONG Replacement Inset Strip
-        inset_frame().show(ui, |ui| {
-            ui.set_min_width(ui.available_width());
-            ui.horizontal_wrapped(|ui| {
-                ui.label(semibold_text("Quick NONG Replace:", 12.5, TEXT_SECONDARY));
-                styled_text_input(ui, &mut app.ui_state.nong_song_id, "Song ID (e.g. 1036782)", 175.0);
-                if ui
-                    .add(brand_cta_button(
-                        ph::MUSIC_NOTE,
-                        "Replace with Custom Audio",
-                    ))
-                    .on_hover_text("Backs up original track before copying custom .mp3/.ogg")
-                    .clicked()
+                if let Some(audio) = rfd::FileDialog::new()
+                    .add_filter("Audio", &["mp3", "ogg"])
+                    .pick_file()
                 {
-                    if let Some(audio) = rfd::FileDialog::new()
-                        .add_filter("Audio", &["mp3", "ogg"])
-                        .pick_file()
-                    {
-                        match install_nong_replacement(&app.ui_state.nong_song_id, &audio) {
-                            Ok(msg) => {
-                                app.push_toast(
-                                    crate::core::worker::ToastKind::Success,
-                                    "NONG Applied",
-                                    msg,
-                                );
-                                app.refresh_tools_async();
-                            }
-                            Err(e) => {
-                                app.push_toast(
-                                    crate::core::worker::ToastKind::Error,
-                                    "NONG Failed",
-                                    e,
-                                );
-                            }
+                    match install_nong_replacement(&app.ui_state.nong_song_id, &audio) {
+                        Ok(msg) => {
+                            app.push_toast(
+                                crate::core::worker::ToastKind::Success,
+                                "NONG Applied",
+                                msg,
+                            );
+                            app.refresh_tools_async();
+                        }
+                        Err(e) => {
+                            app.push_toast(
+                                crate::core::worker::ToastKind::Error,
+                                "NONG Failed",
+                                e,
+                            );
                         }
                     }
                 }
-            });
+            }
         });
 
         ui.add_space(10.0);
 
         // Search, Sort & Filter Toolbar
         ui.horizontal_wrapped(|ui| {
-            let search_w = (ui.available_width() - 410.0).clamp(210.0, 420.0);
+            let search_w = (ui.available_width() - 400.0).clamp(200.0, 420.0);
             let search_resp = styled_search_bar(
                 ui,
                 &mut app.ui_state.song_search,
@@ -868,7 +871,7 @@ fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 });
         });
 
-        ui.add_space(8.0);
+        ui.add_space(6.0);
 
         let songs = filter_and_sort_songs(
             &app.song_report.songs,
@@ -878,19 +881,19 @@ fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             app.ui_state.song_sort,
         );
 
-        ui.horizontal(|ui| {
-            ui.label(
-                RichText::new(format!(
+        ui.label(
+            mono_text(
+                format!(
                     "Showing {} of {} cached entries  ·  {} resolved",
                     songs.len(),
                     app.song_report.total_songs,
                     app.song_report.resolved_count
-                ))
-                .size(11.5)
-                .color(TEXT_MUTED),
-            );
-        });
-        ui.add_space(8.0);
+                ),
+                11.0,
+                TEXT_MUTED,
+            ),
+        );
+        ui.add_space(6.0);
 
         if app.song_report.songs.is_empty() {
             empty_state_card(
@@ -929,8 +932,8 @@ fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         let mut action_reset_manual: Option<String> = None;
         let mut action_copy_id: Option<String> = None;
 
-        // Virtualized row rendering supports thousands of cached songs smoothly
-        let row_height = 74.0;
+        // Virtualized flat hairline-separated rows
+        let row_height = 60.0;
         egui::ScrollArea::vertical()
             .max_height(430.0)
             .show_rows(ui, row_height, songs.len(), |ui, row_range| {
@@ -944,204 +947,186 @@ fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         SongCacheStatus::ManualRenamed => {
                             (ph::PENCIL_SIMPLE, ACCENT_EPIC_BRIGHT, ACCENT_EPIC_SOFT)
                         }
-                        SongCacheStatus::Sfx => (ph::SPEAKER_HIGH, TEXT_SECONDARY, BG_SURFACE),
+                        SongCacheStatus::Sfx => (ph::SPEAKER_HIGH, TEXT_SECONDARY, BG_ELEVATED),
                         SongCacheStatus::Broken => (ph::WARNING, STATUS_ERR, STATUS_ERR_SOFT),
                         SongCacheStatus::Unknown => (ph::MUSIC_NOTE, STATUS_WARN, STATUS_WARN_SOFT),
-                        SongCacheStatus::Cached => (ph::MUSIC_NOTE, TEXT_PRIMARY, BG_SURFACE),
+                        SongCacheStatus::Cached => (ph::MUSIC_NOTE, TEXT_SECONDARY, BG_ELEVATED),
                     };
 
-                    let frame_resp = egui::Frame::none()
-                        .fill(BG_ELEVATED)
-                        .stroke(Stroke::new(1.0_f32, BORDER_SUBTLE))
-                        .rounding(Rounding::same(RADIUS_CARD))
-                        .inner_margin(egui::Margin::symmetric(14.0, 11.0))
-                        .show(ui, |ui| {
-                            ui.set_min_height(46.0);
-                            ui.horizontal(|ui| {
-                                icon_tile(ui, icon_glyph, 42.0, icon_fg, icon_bg);
-                                ui.add_space(6.0);
+                    hover_row(ui, egui::Sense::hover(), |ui| {
+                        ui.horizontal(|ui| {
+                            icon_tile(ui, icon_glyph, 34.0, icon_fg, icon_bg);
+                            ui.add_space(6.0);
 
-                                ui.vertical(|ui| {
-                                    ui.set_width((ui.available_width() - 180.0).max(160.0));
-                                    ui.horizontal(|ui| {
-                                        let primary_line = if song.is_resolved() {
-                                            format!(
-                                                "{} — {}",
-                                                song.display_title(),
-                                                song.display_artist()
-                                            )
-                                        } else {
-                                            song.display_title()
-                                        };
-                                        ui.add(
-                                            egui::Label::new(bold_text(
-                                                primary_line,
-                                                13.5,
-                                                if st == SongCacheStatus::Broken {
-                                                    STATUS_ERR
-                                                } else {
-                                                    TEXT_PRIMARY
-                                                },
-                                            ))
-                                            .truncate(),
-                                        );
-
-                                        match st {
-                                            SongCacheStatus::NongActive => badge_pill(
-                                                ui,
-                                                "NONG",
-                                                ACCENT_EPIC_BRIGHT,
-                                                ACCENT_EPIC_SOFT,
-                                            ),
-                                            SongCacheStatus::ManualRenamed => badge_pill(
-                                                ui,
-                                                "CUSTOM",
-                                                ACCENT_EPIC_BRIGHT,
-                                                ACCENT_EPIC_SOFT,
-                                            ),
-                                            SongCacheStatus::Sfx => {
-                                                badge_pill(ui, "SFX", TEXT_SECONDARY, BG_SURFACE)
-                                            }
-                                            SongCacheStatus::Unknown => badge_pill(
-                                                ui,
-                                                "UNKNOWN",
-                                                STATUS_WARN,
-                                                STATUS_WARN_SOFT,
-                                            ),
-                                            SongCacheStatus::Broken => badge_pill(
-                                                ui,
-                                                "BROKEN",
-                                                STATUS_ERR,
-                                                STATUS_ERR_SOFT,
-                                            ),
-                                            SongCacheStatus::Cached => badge_pill(
-                                                ui,
-                                                "CACHED",
-                                                STATUS_OK,
-                                                STATUS_OK_SOFT,
-                                            ),
-                                        }
-                                        badge_pill(ui, &song.format, TEXT_MUTED, BG_INPUT);
-                                    });
-
-                                    let mut sub_parts = vec![format!("ID: {}", song.id)];
-                                    if !song.associated_levels.is_empty() {
-                                        let lvls = song
-                                            .associated_levels
-                                            .iter()
-                                            .take(2)
-                                            .cloned()
-                                            .collect::<Vec<_>>()
-                                            .join(", ");
-                                        sub_parts.push(format!("Level: {lvls}"));
-                                    }
-                                    if song.is_resolved() {
-                                        sub_parts.push(song.source.label().to_string());
-                                    } else {
-                                        sub_parts.push(
-                                            "Metadata unavailable · Use Rename to assign".into(),
-                                        );
-                                    }
-                                    ui.add(
-                                        egui::Label::new(
-                                            RichText::new(sub_parts.join("  ·  "))
-                                                .size(11.5)
-                                                .color(TEXT_MUTED),
+                            ui.vertical(|ui| {
+                                ui.set_width((ui.available_width() - 165.0).max(160.0));
+                                ui.horizontal(|ui| {
+                                    let primary_line = if song.is_resolved() {
+                                        format!(
+                                            "{} — {}",
+                                            song.display_title(),
+                                            song.display_artist()
                                         )
+                                    } else {
+                                        song.display_title()
+                                    };
+                                    ui.add(
+                                        egui::Label::new(bold_text(
+                                            primary_line,
+                                            13.5,
+                                            if st == SongCacheStatus::Broken {
+                                                STATUS_ERR
+                                            } else {
+                                                TEXT_PRIMARY
+                                            },
+                                        ))
                                         .truncate(),
                                     );
+
+                                    // Show tag only for exceptional cache states (no noisy CACHED/MP3 spam)
+                                    match st {
+                                        SongCacheStatus::NongActive => badge_pill(
+                                            ui,
+                                            "NONG",
+                                            ACCENT_EPIC_BRIGHT,
+                                            ACCENT_EPIC_SOFT,
+                                        ),
+                                        SongCacheStatus::ManualRenamed => badge_pill(
+                                            ui,
+                                            "CUSTOM",
+                                            ACCENT_EPIC_BRIGHT,
+                                            ACCENT_EPIC_SOFT,
+                                        ),
+                                        SongCacheStatus::Sfx => {
+                                            badge_pill(ui, "SFX", TEXT_SECONDARY, BG_ELEVATED)
+                                        }
+                                        SongCacheStatus::Unknown => badge_pill(
+                                            ui,
+                                            "UNKNOWN",
+                                            STATUS_WARN,
+                                            STATUS_WARN_SOFT,
+                                        ),
+                                        SongCacheStatus::Broken => badge_pill(
+                                            ui,
+                                            "BROKEN",
+                                            STATUS_ERR,
+                                            STATUS_ERR_SOFT,
+                                        ),
+                                        SongCacheStatus::Cached => {}
+                                    }
                                 });
 
-                                ui.with_layout(
-                                    egui::Layout::right_to_left(egui::Align::Center),
-                                    |ui| {
-                                        ui.spacing_mut().item_spacing.x = 6.0;
-                                        ui.menu_button(
-                                            RichText::new(ph::DOTS_THREE)
-                                                .size(16.0)
-                                                .color(TEXT_SECONDARY),
-                                            |ui| {
-                                                if ui.button("Rename / Edit Metadata").clicked() {
-                                                    action_open_rename = Some((
-                                                        song.id.clone(),
-                                                        song.title.clone().unwrap_or_default(),
-                                                        song.artist.clone().unwrap_or_default(),
-                                                        song.manual_override,
-                                                    ));
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button("Replace with Custom Audio (NONG)").clicked() {
-                                                    action_nong_replace = Some(song.id.clone());
-                                                    ui.close_menu();
-                                                }
-                                                if song.has_nong_backup
-                                                    && ui.button("Restore Original Audio").clicked()
-                                                {
-                                                    action_restore = Some(song.filename.clone());
-                                                    ui.close_menu();
-                                                }
-                                                if song.manual_override
-                                                    && ui.button("Reset to Auto Metadata").clicked()
-                                                {
-                                                    action_reset_manual = Some(song.id.clone());
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button("Copy Song ID").clicked() {
-                                                    action_copy_id = Some(song.id.clone());
-                                                    ui.close_menu();
-                                                }
-                                                if ui.button("Show in File Manager").clicked() {
-                                                    reveal_file_in_file_manager(
-                                                        std::path::Path::new(&song.path),
-                                                    );
-                                                    ui.close_menu();
-                                                }
-                                            },
-                                        )
-                                        .response
-                                        .on_hover_text("Song actions");
-
-                                        if ui
-                                            .add(
-                                                egui::Button::new(
-                                                    RichText::new(ph::PENCIL_SIMPLE)
-                                                        .size(13.5)
-                                                        .color(TEXT_SECONDARY),
-                                                )
-                                                .fill(BG_SURFACE)
-                                                .stroke(Stroke::new(1.0_f32, BORDER_SUBTLE))
-                                                .rounding(Rounding::same(9.0))
-                                                .min_size(Vec2::new(28.0, 28.0)),
-                                            )
-                                            .on_hover_text("Rename song title & artist")
-                                            .clicked()
-                                        {
-                                            action_open_rename = Some((
-                                                song.id.clone(),
-                                                song.title.clone().unwrap_or_default(),
-                                                song.artist.clone().unwrap_or_default(),
-                                                song.manual_override,
-                                            ));
-                                        }
-
-                                        ui.label(
-                                            RichText::new(human_bytes(song.size_bytes))
-                                                .size(12.0)
-                                                .color(TEXT_SECONDARY),
-                                        );
-                                    },
+                                let mut sub_parts =
+                                    vec![format!("ID: {}", song.id), song.format.clone()];
+                                if !song.associated_levels.is_empty() {
+                                    let lvls = song
+                                        .associated_levels
+                                        .iter()
+                                        .take(2)
+                                        .cloned()
+                                        .collect::<Vec<_>>()
+                                        .join(", ");
+                                    sub_parts.push(format!("Level: {lvls}"));
+                                }
+                                if song.is_resolved() {
+                                    sub_parts.push(song.source.label().to_string());
+                                } else {
+                                    sub_parts.push(
+                                        "Metadata unavailable · Use Rename to assign".into(),
+                                    );
+                                }
+                                ui.add(
+                                    egui::Label::new(
+                                        mono_text(sub_parts.join("  ·  "), 11.0, TEXT_MUTED),
+                                    )
+                                    .truncate(),
                                 );
                             });
-                        });
 
-                    if frame_resp.response.hovered() {
-                        ui.painter().rect_stroke(
-                            frame_resp.response.rect,
-                            Rounding::same(RADIUS_CARD),
-                            Stroke::new(1.0_f32, BORDER_STRONG),
-                        );
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.spacing_mut().item_spacing.x = 6.0;
+                                    ui.menu_button(
+                                        RichText::new(ph::DOTS_THREE)
+                                            .size(16.0)
+                                            .color(TEXT_SECONDARY),
+                                        |ui| {
+                                            if ui.button("Rename / Edit Metadata").clicked() {
+                                                action_open_rename = Some((
+                                                    song.id.clone(),
+                                                    song.title.clone().unwrap_or_default(),
+                                                    song.artist.clone().unwrap_or_default(),
+                                                    song.manual_override,
+                                                ));
+                                                ui.close_menu();
+                                            }
+                                            if ui.button("Replace with Custom Audio (NONG)").clicked() {
+                                                action_nong_replace = Some(song.id.clone());
+                                                ui.close_menu();
+                                            }
+                                            if song.has_nong_backup
+                                                && ui.button("Restore Original Audio").clicked()
+                                            {
+                                                action_restore = Some(song.filename.clone());
+                                                ui.close_menu();
+                                            }
+                                            if song.manual_override
+                                                && ui.button("Reset to Auto Metadata").clicked()
+                                            {
+                                                action_reset_manual = Some(song.id.clone());
+                                                ui.close_menu();
+                                            }
+                                            if ui.button("Copy Song ID").clicked() {
+                                                action_copy_id = Some(song.id.clone());
+                                                ui.close_menu();
+                                            }
+                                            if ui.button("Show in File Manager").clicked() {
+                                                reveal_file_in_file_manager(
+                                                    std::path::Path::new(&song.path),
+                                                );
+                                                ui.close_menu();
+                                            }
+                                        },
+                                    )
+                                    .response
+                                    .on_hover_text("Song actions");
+
+                                    if ui
+                                        .add(
+                                            egui::Button::new(
+                                                RichText::new(ph::PENCIL_SIMPLE)
+                                                    .size(13.0)
+                                                    .color(TEXT_SECONDARY),
+                                            )
+                                            .fill(BG_SURFACE)
+                                            .stroke(Stroke::new(1.0_f32, BORDER_SUBTLE))
+                                            .rounding(Rounding::same(RADIUS_INPUT))
+                                            .min_size(Vec2::new(26.0, 26.0)),
+                                        )
+                                        .on_hover_text("Rename song title & artist")
+                                        .clicked()
+                                    {
+                                        action_open_rename = Some((
+                                            song.id.clone(),
+                                            song.title.clone().unwrap_or_default(),
+                                            song.artist.clone().unwrap_or_default(),
+                                            song.manual_override,
+                                        ));
+                                    }
+
+                                    ui.label(mono_text(
+                                        human_bytes(song.size_bytes),
+                                        11.5,
+                                        TEXT_SECONDARY,
+                                    ));
+                                },
+                            );
+                        });
+                    });
+                    if idx + 1 < songs.len() {
+                        row_divider(ui);
                     }
-                    ui.add_space(6.0);
                 }
             });
 
@@ -1222,17 +1207,13 @@ fn render_songs(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         icon_tile(
                             ui,
                             ph::PENCIL_SIMPLE,
-                            38.0,
+                            36.0,
                             ACCENT_EPIC_BRIGHT,
                             ACCENT_EPIC_SOFT,
                         );
                         ui.vertical(|ui| {
-                            ui.label(bold_text("Edit Song Metadata", 16.0, TEXT_PRIMARY));
-                            ui.label(
-                                RichText::new(format!("Song ID: {song_id}"))
-                                    .size(12.0)
-                                    .color(TEXT_MUTED),
-                            );
+                            ui.label(bold_text("Edit Song Metadata", 15.5, TEXT_PRIMARY));
+                            ui.label(mono_text(format!("Song ID: {song_id}"), 11.5, TEXT_MUTED));
                         });
                     });
                     ui.add_space(12.0);

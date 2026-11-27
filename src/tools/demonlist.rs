@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::time::Duration;
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize)]
@@ -11,6 +11,16 @@ pub struct PointercrateDemon {
     pub video: String,
     pub publisher: String,
     pub verifier: String,
+}
+
+pub fn pointercrate_page_url(limit: usize, after: Option<u32>) -> String {
+    let clamped = limit.clamp(1, 100);
+    match after {
+        Some(pos) => format!(
+            "https://pointercrate.com/api/v2/demons/listed/?limit={clamped}&after={pos}"
+        ),
+        None => format!("https://pointercrate.com/api/v2/demons/listed/?limit={clamped}"),
+    }
 }
 
 pub fn parse_pointercrate_json(raw: &str) -> Result<Vec<PointercrateDemon>, String> {
@@ -63,28 +73,53 @@ pub fn parse_pointercrate_json(raw: &str) -> Result<Vec<PointercrateDemon>, Stri
 }
 
 pub fn fetch_pointercrate_demons(limit: usize) -> Result<Vec<PointercrateDemon>, String> {
-    let url = format!(
-        "https://pointercrate.com/api/v2/demons/listed/?limit={}",
-        limit.clamp(10, 150)
-    );
+    let target = limit.clamp(10, 150);
     let agent = ureq::AgentBuilder::new()
         .timeout_connect(Duration::from_secs(8))
         .timeout_read(Duration::from_secs(12))
         .build();
+    let user_agent = format!("GeoDeck/{}", crate::core::updater::current_app_display_version());
 
-    let resp = agent
-        .get(&url)
-        .set(
-            "User-Agent",
-            &format!("GeoDeck/{}", crate::core::updater::current_app_display_version()),
-        )
-        .call()
-        .map_err(|e| format!("Pointercrate API failed: {e}"))?;
+    let mut all = Vec::with_capacity(target);
+    let mut seen_positions = HashSet::new();
+    let mut after_pos: Option<u32> = None;
 
-    let raw = resp
-        .into_string()
-        .map_err(|e| format!("Failed reading Pointercrate response: {e}"))?;
-    parse_pointercrate_json(&raw)
+    while all.len() < target {
+        let page_limit = (target - all.len()).min(100);
+        let url = pointercrate_page_url(page_limit, after_pos);
+
+        let resp = agent
+            .get(&url)
+            .set("User-Agent", &user_agent)
+            .set("Accept", "application/json")
+            .call()
+            .map_err(|e| format!("Pointercrate API failed: {e}"))?;
+
+        let raw = resp
+            .into_string()
+            .map_err(|e| format!("Failed reading Pointercrate response: {e}"))?;
+        let page = parse_pointercrate_json(&raw)?;
+        if page.is_empty() {
+            break;
+        }
+
+        let last_pos = page.iter().map(|d| d.position).max();
+        let page_count = page.len();
+        for demon in page {
+            if seen_positions.insert(demon.position) {
+                all.push(demon);
+            }
+        }
+
+        if page_count < page_limit || last_pos.is_none() || last_pos == after_pos {
+            break;
+        }
+        after_pos = last_pos;
+    }
+
+    all.sort_by_key(|d| d.position);
+    all.truncate(target);
+    Ok(all)
 }
 
 /// Cross-references a Pointercrate demon name against the player's local `CCGameManager.dat` progress map.

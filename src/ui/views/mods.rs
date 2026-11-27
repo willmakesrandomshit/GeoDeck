@@ -1,4 +1,4 @@
-use eframe::egui::{self, RichText, Rounding, Stroke};
+use eframe::egui::{self, RichText};
 
 use crate::core::platform::open_in_file_manager;
 use crate::geode::dependency::{IssueAction, IssueSeverity};
@@ -64,14 +64,14 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 dialog_frame().show(ui, |ui| {
                     ui.set_max_width(420.0);
                     ui.horizontal(|ui| {
-                        icon_tile(ui, ph::TRASH, 38.0, STATUS_ERR, STATUS_ERR_SOFT);
+                        icon_tile(ui, ph::TRASH, 36.0, STATUS_ERR, STATUS_ERR_SOFT);
                         ui.vertical(|ui| {
-                            ui.label(bold_text("Uninstall Geode Mod?", 16.0, TEXT_PRIMARY));
-                            ui.label(
-                                RichText::new(format!("{}  ·  {}", mod_item.name, mod_item.version))
-                                    .size(12.0)
-                                    .color(TEXT_MUTED),
-                            );
+                            ui.label(bold_text("Uninstall Geode Mod?", 15.5, TEXT_PRIMARY));
+                            ui.label(mono_text(
+                                format!("{}  ·  {}", mod_item.name, mod_item.version),
+                                11.5,
+                                TEXT_MUTED,
+                            ));
                         });
                     });
                     ui.add_space(10.0);
@@ -130,7 +130,7 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
         let disabled_mods = total_mods.saturating_sub(enabled_mods);
 
         ui.horizontal_wrapped(|ui| {
-            let search_w = (ui.available_width() - 360.0).clamp(160.0, 420.0);
+            let search_w = (ui.available_width() - 340.0).clamp(160.0, 420.0);
             let search_resp = styled_search_bar(
                 ui,
                 &mut app.ui_state.mod_search,
@@ -179,52 +179,22 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             .into_iter()
             .enumerate()
             {
-                let selected = app.ui_state.mod_filter_mode == idx;
-                let resp = egui::Frame::none()
-                    .fill(if selected {
-                        ACCENT_EPIC_SOFT
-                    } else {
-                        BG_ELEVATED
-                    })
-                    .stroke(Stroke::new(
-                        1.0_f32,
-                        if selected {
-                            ACCENT_EPIC
-                        } else {
-                            BORDER_SUBTLE
-                        },
-                    ))
-                    .rounding(Rounding::same(RADIUS_PILL))
-                    .inner_margin(egui::Margin::symmetric(12.0, 5.0))
-                    .show(ui, |ui| {
-                        ui.label(semibold_text(
-                            label,
-                            12.0,
-                            if selected {
-                                ACCENT_EPIC_BRIGHT
-                            } else {
-                                TEXT_SECONDARY
-                            },
-                        ));
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-                if resp.clicked() {
+                if filter_chip(ui, &label, app.ui_state.mod_filter_mode == idx) {
                     app.ui_state.mod_filter_mode = idx;
                 }
             }
         });
 
         if !app.mod_updates.is_empty() {
-            ui.add_space(12.0);
-            elevated_card_frame().show(ui, |ui| {
+            ui.add_space(10.0);
+            inset_frame().show(ui, |ui| {
                 ui.horizontal(|ui| {
                     ui.label(bold_text(
                         &format!(
                             "{} Compatible Update(s) Available",
                             app.mod_updates.len()
                         ),
-                        14.0,
+                        13.5,
                         ACCENT_EPIC_BRIGHT,
                     ));
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -244,7 +214,7 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                 "{}  ({} -> {})",
                                 upd.mod_name, upd.current_version, upd.target_version
                             ))
-                            .size(12.5)
+                            .size(12.0)
                             .color(TEXT_PRIMARY),
                         );
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -267,7 +237,7 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             });
         }
 
-        ui.add_space(12.0);
+        ui.add_space(10.0);
         let q = app.ui_state.mod_search.trim().to_lowercase();
         let filter_mode = app.ui_state.mod_filter_mode;
         let mods = app.installed_mods.clone();
@@ -315,26 +285,27 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             return;
         }
 
+        let len = filtered.len();
         egui::ScrollArea::vertical()
             .max_height(460.0)
             .show(ui, |ui| {
-                for m in &filtered {
-                    let frame_resp = elevated_card_frame().show(ui, |ui| {
+                for (idx, m) in filtered.iter().enumerate() {
+                    hover_row(ui, egui::Sense::hover(), |ui| {
                         ui.horizontal(|ui| {
                             let logo = app.mod_logo_texture(&m.id, m.logo_rgba.as_ref(), ui.ctx());
                             if let Some(logo) = logo {
                                 ui.add(
                                     egui::Image::new(&logo)
-                                        .fit_to_exact_size(egui::vec2(46.0, 46.0))
+                                        .fit_to_exact_size(egui::vec2(40.0, 40.0))
                                         .rounding(RADIUS_ICON),
                                 );
                             } else {
                                 icon_tile(
                                     ui,
                                     ph::PUZZLE_PIECE,
-                                    46.0,
-                                    ACCENT_EPIC_BRIGHT,
-                                    ACCENT_EPIC_SOFT,
+                                    40.0,
+                                    TEXT_SECONDARY,
+                                    BG_ELEVATED,
                                 );
                             }
 
@@ -342,8 +313,8 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             ui.vertical(|ui| {
                                 ui.set_width((ui.available_width() - 190.0).max(140.0));
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label(bold_text(&m.name, 14.5, TEXT_PRIMARY));
-                                    badge_pill(ui, &m.version, TEXT_PRIMARY, BG_SURFACE);
+                                    ui.label(bold_text(&m.name, 14.0, TEXT_PRIMARY));
+                                    ui.label(mono_text(&m.version, 11.5, TEXT_MUTED));
                                     if let Some(ref gd) = m.gd_win_target {
                                         let matches = app
                                             .probe
@@ -351,12 +322,14 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                             .as_deref()
                                             .map(|a| gd == "*" || gd == a)
                                             .unwrap_or(true);
-                                        badge_pill(
-                                            ui,
-                                            &format!("GD {gd}"),
-                                            if matches { TEXT_SECONDARY } else { STATUS_ERR },
-                                            if matches { BG_SURFACE } else { STATUS_ERR_SOFT },
-                                        );
+                                        if !matches {
+                                            badge_pill(
+                                                ui,
+                                                &format!("GD {gd}"),
+                                                STATUS_ERR,
+                                                STATUS_ERR_SOFT,
+                                            );
+                                        }
                                     }
                                     if m.is_api {
                                         badge_pill(
@@ -368,14 +341,16 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                     }
                                 });
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{}  ·  by {}  ·  {}",
-                                        m.id,
-                                        m.developer,
-                                        human_bytes(m.file_size)
-                                    ))
-                                    .size(11.5)
-                                    .color(TEXT_MUTED),
+                                    mono_text(
+                                        format!(
+                                            "{}  ·  by {}  ·  {}",
+                                            m.id,
+                                            m.developer,
+                                            human_bytes(m.file_size)
+                                        ),
+                                        11.0,
+                                        TEXT_MUTED,
+                                    ),
                                 );
                                 if !m.description.is_empty() {
                                     ui.add(
@@ -425,14 +400,9 @@ fn render_installed(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             );
                         });
                     });
-                    if frame_resp.response.hovered() {
-                        ui.painter().rect_stroke(
-                            frame_resp.response.rect,
-                            Rounding::same(RADIUS_CARD),
-                            Stroke::new(1.0_f32, BORDER_STRONG),
-                        );
+                    if idx + 1 < len {
+                        row_divider(ui);
                     }
-                    ui.add_space(6.0);
                 }
             });
 
@@ -532,29 +502,7 @@ fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             .into_iter()
             .enumerate()
             {
-                let selected = app.ui_state.index_category == idx;
-                let resp = egui::Frame::none()
-                    .fill(if selected { ACCENT_EPIC_SOFT } else { BG_ELEVATED })
-                    .stroke(Stroke::new(
-                        1.0_f32,
-                        if selected { ACCENT_EPIC } else { BORDER_SUBTLE },
-                    ))
-                    .rounding(Rounding::same(RADIUS_PILL))
-                    .inner_margin(egui::Margin::symmetric(12.0, 5.0))
-                    .show(ui, |ui| {
-                        ui.label(semibold_text(
-                            lbl,
-                            12.0,
-                            if selected {
-                                ACCENT_EPIC_BRIGHT
-                            } else {
-                                TEXT_SECONDARY
-                            },
-                        ));
-                    })
-                    .response
-                    .interact(egui::Sense::click());
-                if resp.clicked() {
+                if filter_chip(ui, lbl, app.ui_state.index_category == idx) {
                     app.ui_state.index_category = idx;
                 }
             }
@@ -578,14 +526,16 @@ fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 
         ui.horizontal(|ui| {
             ui.label(
-                RichText::new(format!(
-                    "{} showing ({} total in catalog)  ·  Page {}",
-                    results.len(),
-                    app.index_total,
-                    app.ui_state.index_page
-                ))
-                .size(12.0)
-                .color(TEXT_MUTED),
+                mono_text(
+                    format!(
+                        "{} showing ({} total in catalog)  ·  Page {}",
+                        results.len(),
+                        app.index_total,
+                        app.ui_state.index_page
+                    ),
+                    11.5,
+                    TEXT_MUTED,
+                ),
             );
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 ui.spacing_mut().item_spacing.x = 6.0;
@@ -606,7 +556,7 @@ fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 }
             });
         });
-        ui.add_space(10.0);
+        ui.add_space(8.0);
 
         if results.is_empty() {
             empty_state_card(
@@ -618,31 +568,24 @@ fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             return;
         }
 
+        let len = results.len();
         egui::ScrollArea::vertical()
             .max_height(430.0)
             .show(ui, |ui| {
-                for item in results {
-                    let frame_resp = elevated_card_frame().show(ui, |ui| {
+                for (idx, item) in results.into_iter().enumerate() {
+                    hover_row(ui, egui::Sense::hover(), |ui| {
                         ui.horizontal(|ui| {
                             ui.vertical(|ui| {
                                 ui.set_width((ui.available_width() - 140.0).max(160.0));
                                 ui.horizontal_wrapped(|ui| {
-                                    ui.label(bold_text(&item.name, 14.5, TEXT_PRIMARY));
+                                    ui.label(bold_text(&item.name, 14.0, TEXT_PRIMARY));
                                     if let Some(latest) = item.versions.first() {
-                                        badge_pill(
-                                            ui,
-                                            &format!("v{}", latest.version),
-                                            TEXT_PRIMARY,
-                                            BG_SURFACE,
-                                        );
-                                        if let Some(ref gd) = latest.gd_win {
-                                            badge_pill(
-                                                ui,
-                                                &format!("GD {gd}"),
-                                                ACCENT_EPIC_BRIGHT,
-                                                ACCENT_EPIC_SOFT,
-                                            );
-                                        }
+                                        let meta = if let Some(ref gd) = latest.gd_win {
+                                            format!("v{}  ·  GD {gd}", latest.version)
+                                        } else {
+                                            format!("v{}", latest.version)
+                                        };
+                                        ui.label(mono_text(meta, 11.5, TEXT_MUTED));
                                     }
                                     if item.featured {
                                         status_dot_pill(
@@ -654,12 +597,14 @@ fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                     }
                                 });
                                 ui.label(
-                                    RichText::new(format!(
-                                        "{}  ·  by {}  ·  {} downloads",
-                                        item.id, item.developer, item.download_count
-                                    ))
-                                    .size(11.5)
-                                    .color(TEXT_MUTED),
+                                    mono_text(
+                                        format!(
+                                            "{}  ·  by {}  ·  {} downloads",
+                                            item.id, item.developer, item.download_count
+                                        ),
+                                        11.0,
+                                        TEXT_MUTED,
+                                    ),
                                 );
                                 if !item.description.is_empty() {
                                     ui.label(
@@ -694,14 +639,9 @@ fn render_index_browser(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             );
                         });
                     });
-                    if frame_resp.response.hovered() {
-                        ui.painter().rect_stroke(
-                            frame_resp.response.rect,
-                            Rounding::same(RADIUS_CARD),
-                            Stroke::new(1.0_f32, BORDER_STRONG),
-                        );
+                    if idx + 1 < len {
+                        row_divider(ui);
                     }
-                    ui.add_space(6.0);
                 }
             });
     });
@@ -718,7 +658,7 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 } else {
                     ph::CHECK_CIRCLE
                 },
-                38.0,
+                36.0,
                 if audit.errors > 0 {
                     STATUS_ERR
                 } else {
@@ -734,16 +674,15 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             ui.vertical(|ui| {
                 ui.label(bold_text(
                     "Compatibility & Dependency Audit",
-                    15.5,
+                    15.0,
                     TEXT_PRIMARY,
                 ));
                 ui.label(
-                    RichText::new(format!(
-                        "{} error(s)  ·  {} warning(s)",
-                        audit.errors, audit.warnings
-                    ))
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
+                    mono_text(
+                        format!("{} error(s)  ·  {} warning(s)", audit.errors, audit.warnings),
+                        11.5,
+                        TEXT_MUTED,
+                    ),
                 );
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -755,7 +694,7 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 }
             });
         });
-        ui.add_space(12.0);
+        ui.add_space(10.0);
 
         if audit.issues.is_empty() {
             empty_state_card(
@@ -766,12 +705,13 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             );
         }
 
-        for issue in audit.issues {
+        let len = audit.issues.len();
+        for (idx, issue) in audit.issues.into_iter().enumerate() {
             let (col, bg) = match issue.severity {
                 IssueSeverity::Error => (STATUS_ERR, STATUS_ERR_SOFT),
                 IssueSeverity::Warning => (STATUS_WARN, STATUS_WARN_SOFT),
             };
-            elevated_card_frame().show(ui, |ui| {
+            hover_row(ui, egui::Sense::hover(), |ui| {
                 ui.horizontal(|ui| {
                     ui.vertical(|ui| {
                         ui.set_width((ui.available_width() - 180.0).max(160.0));
@@ -856,11 +796,13 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     });
                 });
             });
-            ui.add_space(6.0);
+            if idx + 1 < len {
+                row_divider(ui);
+            }
         }
     });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
     // Keybind Doctor Card
     let kb = app.keybind_report.clone();
@@ -869,7 +811,7 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             icon_tile(
                 ui,
                 ph::KEYBOARD,
-                38.0,
+                36.0,
                 if kb.conflicts.is_empty() {
                     STATUS_OK
                 } else {
@@ -883,15 +825,17 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             );
             ui.add_space(4.0);
             ui.vertical(|ui| {
-                ui.label(bold_text("Keybind Doctor", 15.5, TEXT_PRIMARY));
+                ui.label(bold_text("Keybind Doctor", 15.0, TEXT_PRIMARY));
                 ui.label(
-                    RichText::new(format!(
-                        "{} hotkey binding(s) scanned  ·  {} conflict(s)",
-                        kb.total_bindings,
-                        kb.conflicts.len()
-                    ))
-                    .size(12.0)
-                    .color(TEXT_SECONDARY),
+                    mono_text(
+                        format!(
+                            "{} hotkey binding(s) scanned  ·  {} conflict(s)",
+                            kb.total_bindings,
+                            kb.conflicts.len()
+                        ),
+                        11.5,
+                        TEXT_MUTED,
+                    ),
                 );
             });
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -913,21 +857,22 @@ fn render_audit(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 "No two Geode mods currently claim the same GLFW keyboard shortcut.",
             );
         } else {
-            for (combo, bindings) in &kb.conflicts {
-                elevated_card_frame().show(ui, |ui| {
+            let len = kb.conflicts.len();
+            for (idx, (combo, bindings)) in kb.conflicts.iter().enumerate() {
+                hover_row(ui, egui::Sense::hover(), |ui| {
                     ui.horizontal_wrapped(|ui| {
                         badge_pill(ui, combo, STATUS_WARN, STATUS_WARN_SOFT);
                         ui.label(bold_text("Collision between multiple mods:", 13.0, TEXT_PRIMARY));
                     });
                     for b in bindings {
                         ui.label(
-                            RichText::new(format!("• {}  ->  {}", b.mod_id, b.action))
-                                .size(12.0)
-                                .color(TEXT_SECONDARY),
+                            mono_text(format!("• {}  ->  {}", b.mod_id, b.action), 11.5, TEXT_SECONDARY),
                         );
                     }
                 });
-                ui.add_space(6.0);
+                if idx + 1 < len {
+                    row_divider(ui);
+                }
             }
         }
     });
@@ -970,7 +915,7 @@ fn render_profiles_export(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
     ui.columns(2, |cols| {
         card_frame().show(&mut cols[0], |ui| {
             ui.set_min_height(320.0);
-            ui.label(bold_text("Mod Profiles", 15.5, TEXT_PRIMARY));
+            ui.label(bold_text("Mod Profiles", 15.0, TEXT_PRIMARY));
             ui.label(
                 RichText::new(
                     "Capture enabled mod sets and per-mod settings.json files into switchable presets.",
@@ -1032,7 +977,7 @@ fn render_profiles_export(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                 }
             }
 
-            ui.add_space(12.0);
+            ui.add_space(10.0);
             let profiles = app.config.mod_profiles.clone();
             let mut delete_idx: Option<usize> = None;
             if profiles.is_empty() {
@@ -1042,21 +987,24 @@ fn render_profiles_export(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         .color(TEXT_MUTED),
                 );
             }
+            let len = profiles.len();
             for (idx, prof) in profiles.iter().enumerate() {
-                elevated_card_frame().show(ui, |ui| {
+                hover_row(ui, egui::Sense::hover(), |ui| {
                     ui.horizontal(|ui| {
                         ui.vertical(|ui| {
                             ui.label(bold_text(&prof.name, 13.5, TEXT_PRIMARY));
                             let enabled_cnt = prof.enabled_mods.values().filter(|&&b| b).count();
                             ui.label(
-                                RichText::new(format!(
-                                    "GD {}  ·  {} enabled / {} total",
-                                    prof.target_gd_version,
-                                    enabled_cnt,
-                                    prof.enabled_mods.len()
-                                ))
-                                .size(11.5)
-                                .color(TEXT_MUTED),
+                                mono_text(
+                                    format!(
+                                        "GD {}  ·  {} enabled / {} total",
+                                        prof.target_gd_version,
+                                        enabled_cnt,
+                                        prof.enabled_mods.len()
+                                    ),
+                                    11.0,
+                                    TEXT_MUTED,
+                                ),
                             );
                         });
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1091,7 +1039,9 @@ fn render_profiles_export(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         });
                     });
                 });
-                ui.add_space(5.0);
+                if idx + 1 < len {
+                    row_divider(ui);
+                }
             }
             if let Some(i) = delete_idx {
                 let p = app.config.mod_profiles.remove(i);
@@ -1102,7 +1052,7 @@ fn render_profiles_export(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
 
         card_frame().show(&mut cols[1], |ui| {
             ui.set_min_height(320.0);
-            ui.label(bold_text("Portable .gdpack Studio", 15.5, TEXT_PRIMARY));
+            ui.label(bold_text("Portable .gdpack Studio", 15.0, TEXT_PRIMARY));
             ui.label(
                 RichText::new(
                     "Bundle .geode packages + SHA-256 manifest + optional mod settings into one portable archive.",

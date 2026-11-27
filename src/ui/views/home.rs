@@ -1,8 +1,9 @@
-use eframe::egui::{self, Color32, RichText, Rounding, Stroke};
+use eframe::egui::{self, Color32, RichText, Rounding, Stroke, Vec2};
 
 use crate::core::config::LaunchMode;
 use crate::core::platform::open_in_file_manager;
 use crate::geode::profiles::QuickModPreset;
+use crate::launcher::detection::human_bytes;
 use crate::ui::app::{GeodeDeckApp, ModsSubTab, NavTab};
 use crate::ui::icons::ph;
 use crate::ui::theme::*;
@@ -20,61 +21,58 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
             || "Checking Geode".into(),
             |v| format!("Geode {v}"),
         ),
-        None => "Geode status unavailable".into(),
+        None => "Geode unavailable".into(),
     };
 
     let art = app.game_art(ui.ctx());
     egui::Frame::none()
         .fill(BG_SURFACE)
-        .stroke(Stroke::new(1.0_f32, BORDER_STRONG))
+        .stroke(Stroke::new(1.0_f32, BORDER_SUBTLE))
         .rounding(Rounding::same(RADIUS_PANEL))
-        .inner_margin(egui::Margin::same(24.0))
+        .inner_margin(egui::Margin::same(22.0))
         .show(ui, |ui| {
             let width = ui.available_width();
             let art_width = if art.is_some() {
-                (width * 0.37).min(330.0)
+                (width * 0.34).clamp(220.0, 324.0)
             } else {
                 0.0
             };
-            ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::left_to_right(egui::Align::TOP), |ui| {
                 ui.vertical(|ui| {
                     ui.set_min_width(
                         (width - art_width - ui.spacing().item_spacing.x).max(220.0),
                     );
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label(
-                            RichText::new("ACTIVE WORKSPACE")
-                                .size(11.0)
-                                .strong()
-                                .color(ACCENT_EPIC_BRIGHT),
-                        );
-                        badge_pill(
-                            ui,
-                            "MAX PERFORMANCE",
-                            ACCENT_EPIC_BRIGHT,
-                            ACCENT_EPIC_SOFT,
-                        );
-                    });
-                    ui.add_space(6.0);
-                    ui.label(display_text("Geometry Dash", 35.0, TEXT_PRIMARY));
-                    ui.add_space(10.0);
+                    ui.set_max_width(
+                        (width - art_width - ui.spacing().item_spacing.x).max(220.0),
+                    );
                     if let Some(install) = &install {
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label(semibold_text(&install.name, 15.0, TEXT_PRIMARY));
-                            status_dot_pill(ui, "Active Slot", STATUS_OK, STATUS_OK_SOFT);
-                        });
-                        ui.add_space(5.0);
                         let version = install.detected_gd_version.as_deref().unwrap_or("Unknown");
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+                            let (dot_r, _) =
+                                ui.allocate_exact_size(Vec2::splat(7.0), egui::Sense::hover());
+                            ui.painter().circle_filled(dot_r.center(), 2.8, STATUS_OK);
+                            ui.label(mono_text(
+                                format!("ACTIVE SLOT  ·  GD {version}  ·  {geode}"),
+                                11.0,
+                                TEXT_MUTED,
+                            ));
+                        });
+                        ui.add_space(6.0);
+                        ui.label(display_text("Geometry Dash", 32.0, TEXT_PRIMARY));
+                        ui.add_space(4.0);
+                        ui.label(RichText::new(&install.name).size(13.5).color(TEXT_SECONDARY));
+                    } else {
+                        ui.label(display_text("Geometry Dash", 32.0, TEXT_PRIMARY));
+                        ui.add_space(4.0);
                         ui.label(
-                            RichText::new(format!("Game {version}   ·   {geode}"))
-                                .size(13.0)
+                            RichText::new("No active installation configured")
+                                .size(13.5)
                                 .color(TEXT_SECONDARY),
                         );
-                    } else {
-                        ui.label(RichText::new("No active install").color(TEXT_SECONDARY));
                     }
 
-                    ui.add_space(22.0);
+                    ui.add_space(18.0);
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing.x = 8.0;
                         if app.active_session.is_some() {
@@ -96,7 +94,7 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                                 "Play"
                             };
                             if ui
-                                .add_sized([164.0, 44.0], epic_cta_button(ph::PLAY, play_label))
+                                .add_sized([152.0, 40.0], epic_cta_button(ph::PLAY, play_label))
                                 .clicked()
                             {
                                 app.trigger_launch(mode);
@@ -128,7 +126,6 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                     });
 
                     ui.add_space(12.0);
-                    // Compact Quick Controls: Mod Preset + Steam Update Lock + Health Check
                     ui.horizontal_wrapped(|ui| {
                         ui.spacing_mut().item_spacing.x = 6.0;
                         ui.menu_button(
@@ -160,9 +157,9 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                             ph::LOCK_OPEN
                         };
                         let lock_lbl = if app.manifest_locked {
-                            "Steam Update Locked"
+                            "Steam Lock: ON"
                         } else {
-                            "Steam Lock: Off"
+                            "Steam Lock: OFF"
                         };
                         if ui
                             .add(epic_secondary_button(lock_icon, lock_lbl))
@@ -183,259 +180,360 @@ pub fn render(app: &mut GeodeDeckApp, ui: &mut egui::Ui) {
                         }
                     });
                 });
+
                 if let Some(art) = &art {
-                    egui::Frame::none()
-                        .fill(Color32::TRANSPARENT)
-                        .stroke(Stroke::new(1.0_f32, BORDER_GLOW.gamma_multiply(0.5)))
-                        .rounding(Rounding::same(16.0))
-                        .show(ui, |ui| {
-                            ui.add(
-                                egui::Image::new(art)
-                                    .fit_to_exact_size(egui::vec2(art_width, art_width * 0.64))
-                                    .rounding(16.0),
-                            );
-                        });
+                    let tex_sz = art.size_vec2();
+                    let aspect = (tex_sz.y / tex_sz.x.max(1.0)).clamp(0.42, 0.70);
+                    let draw_w = art_width;
+                    let draw_h = (draw_w * aspect).min(182.0);
+                    let img_resp = ui.add(
+                        egui::Image::new(art)
+                            .fit_to_exact_size(egui::vec2(draw_w, draw_h))
+                            .rounding(RADIUS_CARD),
+                    );
+                    ui.painter().rect_stroke(
+                        img_resp.rect,
+                        Rounding::same(RADIUS_CARD),
+                        Stroke::new(1.0_f32, BORDER_STRONG),
+                    );
                 }
             });
         });
 
-    ui.add_space(14.0);
+    ui.add_space(12.0);
 
-    // Live Player Progression Strip from CCGameManager.dat
+    // Live Player Progression Telemetry Strip
     if let Some(ref sum) = app.save_summary {
         let st = &sum.player_stats;
-        ui.columns(4, |cols| {
-            stat_tile(
-                &mut cols[0],
-                ph::STAR,
-                "PLAYER STATS",
-                &sum.player_name,
-                &format!("{} Stars  ·  {} Moons", st.stars, st.moons),
-                ACCENT_EPIC_BRIGHT,
-            );
-            stat_tile(
-                &mut cols[1],
-                ph::FIRE,
-                "DEMONS",
-                &format!("{}", st.demons),
-                &format!("{} active grind(s)", sum.active_grinds.len()),
-                STATUS_OK,
-            );
-            stat_tile(
-                &mut cols[2],
-                ph::DIAMOND,
-                "DIAMONDS & ORBS",
-                &format!("{}", st.diamonds),
-                &format!("{} Orbs  ·  {} Coins", st.orbs, st.user_coins),
-                TEXT_PRIMARY,
-            );
-            stat_tile(
-                &mut cols[3],
-                ph::SHIELD_CHECK,
-                "DISCORD RPC",
-                if !app.config.discord_rpc_enabled {
-                    "Disabled"
-                } else if app.discord_rpc.is_connected() {
-                    "Connected"
-                } else {
-                    "Waiting"
-                },
-                "Rich Presence IPC",
-                if app.discord_rpc.is_connected() {
-                    STATUS_OK
-                } else {
-                    TEXT_MUTED
-                },
-            );
-        });
-        ui.add_space(14.0);
-    }
-
-    // 3x2 Quick Overview Grid
-    ui.spacing_mut().item_spacing.x = 12.0;
-    ui.columns(2, |columns| {
-        let bkp_latest = app
-            .snapshots
-            .first()
-            .map_or("No backup found".to_string(), |s| s.created_at.clone());
-        if overview_tile(
-            &mut columns[0],
-            ph::SHIELD_CHECK,
-            "Latest Vault Backup",
-            &bkp_latest,
-            STATUS_OK,
-            STATUS_OK_SOFT,
-            "Open Backups",
-        ) {
-            app.navigate_to(NavTab::Backups);
-        }
-
-        let mod_sub = if app.mod_updates.is_empty() {
-            format!("{} mods installed", app.installed_mods.len())
+        let stars_sub = format!("{} Stars  ·  {} Moons", st.stars, st.moons);
+        let demons_val = format!("{}", st.demons);
+        let grinds_sub = format!("{} active grind(s)", sum.active_grinds.len());
+        let diamonds_val = format!("{}", st.diamonds);
+        let orbs_sub = format!("{} Orbs  ·  {} Coins", st.orbs, st.user_coins);
+        let rpc_val = if !app.config.discord_rpc_enabled {
+            "Disabled"
+        } else if app.discord_rpc.is_connected() {
+            "Connected"
         } else {
-            format!("{} update(s) available", app.mod_updates.len())
+            "Waiting"
         };
-        if overview_tile(
-            &mut columns[1],
-            ph::PUZZLE_PIECE,
-            "Geode Mods & Updates",
-            &mod_sub,
-            ACCENT_EPIC_BRIGHT,
-            ACCENT_EPIC_SOFT,
-            "Open Mods",
-        ) {
-            if app.mod_updates.is_empty() {
-                app.check_mod_updates_async();
-            }
-            app.ui_state.mods_subtab = ModsSubTab::Installed;
-            app.navigate_to(NavTab::Mods);
-        }
-    });
-
-    ui.add_space(12.0);
-
-    ui.columns(2, |columns| {
-        let songs_sub = format!(
-            "{} cached  ·  {} resolved",
-            app.song_report.total_songs, app.song_report.resolved_count
-        );
-        if overview_tile(
-            &mut columns[0],
-            ph::MUSIC_NOTE,
-            "Audio & NONG Library",
-            &songs_sub,
-            ACCENT_EPIC_BRIGHT,
-            ACCENT_EPIC_SOFT,
-            "Open Audio & NONG Library",
-        ) {
-            app.ui_state.tools_subtab = 3;
-            app.navigate_to(NavTab::Tools);
-        }
-
-        let demon_sub = if app.demonlist.is_empty() {
-            "Pointercrate Top 150 & Grinds".into()
-        } else {
-            format!("{} demons loaded · Top 150", app.demonlist.len())
-        };
-        if overview_tile(
-            &mut columns[1],
-            ph::STAR,
-            "Demonlist & Grinds",
-            &demon_sub,
-            STATUS_WARN,
-            STATUS_WARN_SOFT,
-            "Open Pointercrate Demonlist",
-        ) {
-            app.navigate_to(NavTab::Demonlist);
-        }
-    });
-
-    ui.add_space(12.0);
-
-    ui.columns(2, |columns| {
-        let inst_count = app.config.installations.len();
-        let inst_sub = format!(
-            "{inst_count} slot(s)  ·  {}",
-            if app.probe.geode_installed {
-                "Geode Ready"
-            } else {
-                "Check Loader"
-            }
-        );
-        let inst_fg = if app.probe.geode_installed {
+        let rpc_col = if app.discord_rpc.is_connected() {
             STATUS_OK
         } else {
-            STATUS_WARN
+            TEXT_MUTED
         };
-        let inst_bg = if app.probe.geode_installed {
-            STATUS_OK_SOFT
-        } else {
-            STATUS_WARN_SOFT
-        };
-        if overview_tile(
-            &mut columns[0],
-            ph::SQUARES_FOUR,
-            "Installs & Version Slots",
-            &inst_sub,
-            inst_fg,
-            inst_bg,
-            "Open Installs",
-        ) {
-            app.navigate_to(NavTab::Library);
-        }
 
-        let err_cnt = app
-            .health_findings
-            .iter()
-            .filter(|f| f.severity == crate::tools::diagnostics::DiagnosticSeverity::Error)
-            .count();
-        let health_sub = if app.health_findings.is_empty() {
-            "Run 8-point setup check".into()
-        } else if err_cnt == 0 {
-            format!("All {} checks healthy", app.health_findings.len())
-        } else {
-            format!("{err_cnt} setup issue(s) flagged")
-        };
-        if overview_tile(
-            &mut columns[1],
-            ph::PALETTE,
-            "Textures & Setup Health",
-            &health_sub,
-            if err_cnt > 0 { STATUS_ERR } else { STATUS_OK },
-            if err_cnt > 0 {
-                STATUS_ERR_SOFT
+        telemetry_strip(
+            ui,
+            &[
+                ("PLAYER", &sum.player_name, &stars_sub, ACCENT_EPIC_BRIGHT),
+                ("DEMONS", &demons_val, &grinds_sub, STATUS_OK),
+                ("DIAMONDS", &diamonds_val, &orbs_sub, TEXT_PRIMARY),
+                ("DISCORD RPC", rpc_val, "Rich Presence IPC", rpc_col),
+            ],
+        );
+        ui.add_space(12.0);
+    }
+
+    // Two-Column Workbench Overview: Readiness Links + Live Activity / Grinds
+    ui.spacing_mut().item_spacing.x = 12.0;
+    ui.columns(2, |cols| {
+        let col0_w = (cols[0].available_width() - 38.0).max(180.0);
+        card_frame().show(&mut cols[0], |ui| {
+            ui.set_width(col0_w);
+            ui.set_max_width(col0_w);
+            ui.set_min_height(248.0);
+            ui.label(bold_text("Workspace Readiness", 14.5, TEXT_PRIMARY));
+            ui.label(
+                RichText::new("Live status across backups, mods, audio cache, and setup diagnostics")
+                    .size(11.5)
+                    .color(TEXT_MUTED),
+            );
+            ui.add_space(8.0);
+
+            let bkp_meta = app.snapshots.first().map_or_else(
+                || "No snapshots created".to_string(),
+                |s| format!("{} snapshot(s)  ·  Latest {}", app.snapshots.len(), s.created_at),
+            );
+            let bkp_col = if app.snapshots.is_empty() {
+                STATUS_WARN
             } else {
-                STATUS_OK_SOFT
-            },
-            "Open Health Check",
-        ) {
-            app.ui_state.tools_subtab = 0;
-            app.navigate_to(NavTab::Tools);
-        }
+                STATUS_OK
+            };
+            if readiness_row(
+                ui,
+                "Encrypted Vault",
+                &bkp_meta,
+                if app.snapshots.is_empty() { "Empty" } else { "Protected" },
+                bkp_col,
+            ) {
+                app.navigate_to(NavTab::Backups);
+            }
+            row_divider(ui);
+
+            let mods_meta = if app.mod_updates.is_empty() {
+                format!("{} installed · {} conflict(s)", app.installed_mods.len(), app.mod_audit.errors)
+            } else {
+                format!("{} installed · {} update(s) ready", app.installed_mods.len(), app.mod_updates.len())
+            };
+            let mods_status = if !app.mod_updates.is_empty() {
+                format!("{} update(s)", app.mod_updates.len())
+            } else if app.mod_audit.errors > 0 {
+                format!("{} issue(s)", app.mod_audit.errors)
+            } else {
+                "Synced".into()
+            };
+            let mods_col = if app.mod_audit.errors > 0 {
+                STATUS_WARN
+            } else if !app.mod_updates.is_empty() {
+                ACCENT_EPIC_BRIGHT
+            } else {
+                STATUS_OK
+            };
+            if readiness_row(ui, "Geode Mods", &mods_meta, &mods_status, mods_col) {
+                app.ui_state.mods_subtab = ModsSubTab::Installed;
+                app.navigate_to(NavTab::Mods);
+            }
+            row_divider(ui);
+
+            let songs_meta = format!(
+                "{}/{} resolved  ·  {}",
+                app.song_report.resolved_count,
+                app.song_report.total_songs,
+                human_bytes(app.song_report.total_bytes)
+            );
+            let nong_status = if app.song_report.nong_count > 0 {
+                format!("{} NONG", app.song_report.nong_count)
+            } else {
+                "Cached".into()
+            };
+            if readiness_row(
+                ui,
+                "NONG Audio Cache",
+                &songs_meta,
+                &nong_status,
+                ACCENT_EPIC_BRIGHT,
+            ) {
+                app.ui_state.tools_subtab = 3;
+                app.navigate_to(NavTab::Tools);
+            }
+            row_divider(ui);
+
+            let err_cnt = app
+                .health_findings
+                .iter()
+                .filter(|f| f.severity == crate::tools::diagnostics::DiagnosticSeverity::Error)
+                .count();
+            let health_meta = format!(
+                "{} slot(s)  ·  {}",
+                app.config.installations.len(),
+                if app.health_findings.is_empty() {
+                    "8-point check ready".into()
+                } else if err_cnt == 0 {
+                    format!("All {} checks passed", app.health_findings.len())
+                } else {
+                    format!("{err_cnt} setup issue(s) flagged")
+                }
+            );
+            let health_col = if err_cnt > 0 { STATUS_ERR } else { STATUS_OK };
+            if readiness_row(
+                ui,
+                "Setup Health",
+                &health_meta,
+                if err_cnt > 0 { "Needs Review" } else { "Healthy" },
+                health_col,
+            ) {
+                app.ui_state.tools_subtab = 0;
+                app.navigate_to(NavTab::Tools);
+            }
+        });
+
+        let col1_w = (cols[1].available_width() - 38.0).max(180.0);
+        card_frame().show(&mut cols[1], |ui| {
+            ui.set_width(col1_w);
+            ui.set_max_width(col1_w);
+            ui.set_min_height(248.0);
+
+            let grinds: Vec<_> = app
+                .save_summary
+                .as_ref()
+                .map(|s| s.active_grinds.iter().take(4).cloned().collect())
+                .unwrap_or_default();
+
+            if !grinds.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_max_width((col1_w - 135.0).max(100.0));
+                        ui.label(bold_text("Active Demon Grinds", 14.5, TEXT_PRIMARY));
+                        ui.label(
+                            RichText::new("Normal-mode runs recorded in CCGameManager.dat")
+                                .size(11.5)
+                                .color(TEXT_MUTED),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(epic_secondary_button(ph::CARET_RIGHT, "Demonlist"))
+                            .clicked()
+                        {
+                            app.ui_state.demonlist_subtab = 1;
+                            app.navigate_to(NavTab::Demonlist);
+                        }
+                    });
+                });
+                ui.add_space(10.0);
+
+                let count = grinds.len();
+                for (idx, g) in grinds.iter().enumerate() {
+                    ui.vertical(|ui| {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_max_width((col1_w - 75.0).max(100.0));
+                                ui.add(
+                                    egui::Label::new(semibold_text(&g.name, 13.0, TEXT_PRIMARY))
+                                        .truncate(),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!(
+                                            "by {}  ·  {} attempt(s)",
+                                            g.author, g.attempts
+                                        ))
+                                        .size(11.0)
+                                        .color(TEXT_MUTED),
+                                    )
+                                    .truncate(),
+                                );
+                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(mono_text(
+                                        format!("{}%", g.percent),
+                                        13.0,
+                                        ACCENT_EPIC_BRIGHT,
+                                    ));
+                                },
+                            );
+                        });
+                        ui.add_space(5.0);
+                        let bar_w = ui.available_width().max(60.0);
+                        let (bar_rect, _) =
+                            ui.allocate_exact_size(Vec2::new(bar_w, 3.0), egui::Sense::hover());
+                        ui.painter()
+                            .rect_filled(bar_rect, Rounding::same(1.5), BG_ELEVATED);
+                        let fill_w = (bar_w * (g.percent as f32 / 100.0)).clamp(3.0, bar_w);
+                        ui.painter().rect_filled(
+                            egui::Rect::from_min_size(bar_rect.min, Vec2::new(fill_w, 3.0)),
+                            Rounding::same(1.5),
+                            ACCENT_EPIC,
+                        );
+                    });
+                    if idx + 1 < count {
+                        ui.add_space(6.0);
+                        row_divider(ui);
+                        ui.add_space(4.0);
+                    }
+                }
+            } else {
+                ui.horizontal(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_max_width((col1_w - 150.0).max(100.0));
+                        ui.label(bold_text("Recent Vault Snapshots", 14.5, TEXT_PRIMARY));
+                        ui.label(
+                            RichText::new("Latest DPAPI-encrypted Geometry Dash save archives")
+                                .size(11.5)
+                                .color(TEXT_MUTED),
+                        );
+                    });
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui
+                            .add(epic_secondary_button(ph::FLOPPY_DISK, "Create Backup"))
+                            .clicked()
+                        {
+                            app.trigger_manual_backup("Home Quick Backup");
+                        }
+                    });
+                });
+                ui.add_space(10.0);
+
+                if app.snapshots.is_empty() {
+                    empty_state_card(
+                        ui,
+                        ph::SHIELD_CHECK,
+                        "No Snapshots Yet",
+                        "Create your first encrypted vault snapshot to safeguard progress.",
+                    );
+                } else {
+                    let snaps: Vec<_> = app.snapshots.iter().take(4).cloned().collect();
+                    let count = snaps.len();
+                    for (idx, snap) in snaps.into_iter().enumerate() {
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_max_width((col1_w - 95.0).max(100.0));
+                                ui.add(
+                                    egui::Label::new(semibold_text(
+                                        &snap.created_at,
+                                        13.0,
+                                        TEXT_PRIMARY,
+                                    ))
+                                    .truncate(),
+                                );
+                                ui.add(
+                                    egui::Label::new(
+                                        RichText::new(format!(
+                                            "{}  ·  {} file(s)",
+                                            snap.trigger_reason, snap.file_count
+                                        ))
+                                        .size(11.0)
+                                        .color(TEXT_MUTED),
+                                    )
+                                    .truncate(),
+                                );
+                            });
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    ui.label(mono_text(
+                                        human_bytes(snap.total_bytes),
+                                        11.5,
+                                        TEXT_SECONDARY,
+                                    ));
+                                },
+                            );
+                        });
+                        if idx + 1 < count {
+                            row_divider(ui);
+                        }
+                    }
+                }
+            }
+        });
     });
 }
 
-fn overview_tile(
+fn readiness_row(
     ui: &mut egui::Ui,
-    icon: &str,
     title: &str,
-    subtitle: &str,
-    fg: Color32,
-    bg: Color32,
-    tooltip: &str,
+    meta: &str,
+    status: &str,
+    status_col: Color32,
 ) -> bool {
-    let col_w = ui.available_width();
-    let frame_resp = elevated_card_frame()
-        .show(ui, |ui| {
-            ui.set_width((col_w - 28.0).max(150.0));
-            ui.horizontal(|ui| {
-                icon_tile(ui, icon, 40.0, fg, bg);
-                ui.add_space(6.0);
-                ui.vertical(|ui| {
-                    ui.set_max_width((col_w - 130.0).max(100.0));
-                    ui.label(semibold_text(title, 13.5, TEXT_PRIMARY));
-                    ui.add(
-                        egui::Label::new(
-                            RichText::new(subtitle).size(12.0).color(TEXT_SECONDARY),
-                        )
-                        .truncate(),
-                    );
-                });
-                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    ui.label(RichText::new(ph::CARET_RIGHT).size(15.0).color(TEXT_MUTED));
-                });
+    let resp = hover_row(ui, egui::Sense::click(), |ui| {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
+                ui.set_max_width((ui.available_width() - 110.0).max(100.0));
+                ui.label(semibold_text(title, 13.0, TEXT_PRIMARY));
+                ui.add(
+                    egui::Label::new(RichText::new(meta).size(11.5).color(TEXT_MUTED)).truncate(),
+                );
             });
-        })
-        .response
-        .interact(egui::Sense::click())
-        .on_hover_text(tooltip);
-
-    if frame_resp.hovered() {
-        ui.painter().rect_stroke(
-            frame_resp.rect,
-            Rounding::same(RADIUS_CARD),
-            Stroke::new(1.0_f32, BORDER_GLOW.gamma_multiply(0.75)),
-        );
-    }
-    frame_resp.clicked()
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.spacing_mut().item_spacing.x = 6.0;
+                ui.label(RichText::new(ph::CARET_RIGHT).size(13.0).color(TEXT_MUTED));
+                ui.label(mono_text(status, 11.0, status_col));
+            });
+        });
+    });
+    resp.clicked()
 }

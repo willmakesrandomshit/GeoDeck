@@ -31,7 +31,11 @@ fn run_self_check() -> i32 {
     let crashes = scan_crash_logs(&cfg.game_path);
     let songs = scan_song_cache();
 
-    println!("=== GeoDeck Alpha-1.0.0 ({}) Self-Check ===", env!("CARGO_PKG_VERSION"));
+    println!(
+        "=== GeoDeck {} ({}) Self-Check ===",
+        geodedeck::core::updater::current_app_display_version(),
+        env!("CARGO_PKG_VERSION")
+    );
     println!("Active Slot: {} ({})", cfg.active_version, cfg.game_path);
     println!(
         "GD PE Timestamp: {:?} -> Version: {:?}",
@@ -137,6 +141,7 @@ fn main() -> eframe::Result<()> {
 
     let cli = parse_cli_options();
 
+    let capture_mode = cli.capture_path.is_some();
     let options = eframe::NativeOptions {
         viewport: eframe::egui::ViewportBuilder::default()
             .with_title("GeoDeck — Geometry Dash Manager")
@@ -145,7 +150,11 @@ fn main() -> eframe::Result<()> {
             .with_inner_size(cli.window_size)
             .with_min_inner_size([920.0, 600.0]),
         persist_window: false,
-        persistence_path: Some(geodedeck::core::config::config_dir().join("compact-ui.ron")),
+        persistence_path: if capture_mode {
+            None
+        } else {
+            Some(geodedeck::core::config::config_dir().join("compact-ui.ron"))
+        },
         ..Default::default()
     };
 
